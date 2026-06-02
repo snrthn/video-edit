@@ -1,252 +1,242 @@
-import { computed } from 'vue';
-import { useTimelineStore, useProjectStore } from '../stores';
-import { generateId } from '../utils/video-utils';
-import { triggerSave } from '../main';
+import { computed } from 'vue'
+import { useTimelineStore, useProjectStore } from '../stores'
+import { generateId } from '../utils/video-utils'
+import { triggerSave } from '../main'
+import { NEW_CLIP_DEFAULT_DURATION, CLIP_DUPLICATE_GAP } from '../core/constants'
 
 export function useVideoEditor() {
-  const timelineStore = useTimelineStore();
-  const projectStore = useProjectStore();
+  const timelineStore = useTimelineStore()
+  const projectStore = useProjectStore()
 
-  const selectedTrack = computed(() => timelineStore.tracks.find(t => t.id === timelineStore.selectedTrackId));
+  const selectedTrack = computed(() =>
+    timelineStore.tracks.find(t => t.id === timelineStore.selectedTrackId)
+  )
 
   const selectedClips = computed(() => {
-    return timelineStore.selectedClipIds.map(id => {
-      const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === id));
-      return track?.clips.find(c => c.id === id);
-    }).filter(Boolean);
-  });
+    return timelineStore.selectedClipIds
+      .map(id => timelineStore.findClipById(id)?.clip)
+      .filter(Boolean)
+  })
+
+  // ===================== 轨道 =====================
 
   function addTrack(type = 'video') {
-    timelineStore.addTrack(type);
-    triggerSave();
+    const track = timelineStore.addTrack(type)
+    triggerSave()
+    return track
   }
 
   function removeTrack(trackId) {
-    timelineStore.removeTrack(trackId);
-    triggerSave();
+    timelineStore.removeTrack(trackId)
+    triggerSave()
   }
 
-  function addClip(videoId, trackIndex = 0, startTime = 0) {
-    const video = projectStore.getVideo(videoId);
-    if (!video) return null;
+  function toggleMuteTrack(trackId) {
+    timelineStore.toggleTrackMute(trackId)
+    triggerSave()
+  }
 
-    const clip = {
-      id: generateId('clip'),
-      videoId,
-      startTime,
-      endTime: startTime + (video.metadata?.duration || 10),
-      trackIndex,
-      filters: [],
-      volume: 1,
-      speed: 1
-    };
+  // ===================== Clip CRUD =====================
 
-    timelineStore.addClip(clip, trackIndex);
-    triggerSave();
-    return clip;
+  function addClip(videoId, trackId, startTime = 0) {
+    const video = projectStore.getVideo(videoId)
+    if (!video) return null
+
+    const endTime = startTime + (video.metadata?.duration || NEW_CLIP_DEFAULT_DURATION)
+    const clip = timelineStore.addClip(trackId, videoId, startTime, endTime)
+    triggerSave()
+    return clip
   }
 
   function removeClip(clipId) {
-    timelineStore.removeClip(clipId);
-    triggerSave();
+    timelineStore.removeClip(clipId)
+    triggerSave()
   }
 
-  function moveClip(clipId, newTrackIndex, newStartTime) {
-    timelineStore.moveClip(clipId, newTrackIndex, newStartTime);
-    triggerSave();
+  function moveClip(clipId, targetTrackId, newStartTime) {
+    timelineStore.moveClip(clipId, targetTrackId, newStartTime)
+    triggerSave()
   }
 
   function splitClip(clipId, time) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return null;
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return null
+    const { clip } = found
+    if (time <= clip.startTime || time >= clip.endTime) return null
 
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip || time <= clip.startTime || time >= clip.endTime) return null;
+    timelineStore.splitClip(clipId, time)
+    triggerSave()
 
-    timelineStore.splitClip(clipId, time);
-    triggerSave();
-    
-    const newClip = track.clips.find(c => c.startTime === time);
-    return newClip;
+    // 返回新创建的 clip
+    const newClips = found.track.clips.filter(c => c.id !== clipId)
+    return newClips[newClips.length - 1] || null
   }
 
   function trimClip(clipId, newStart, newEnd) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
+    // trim 操作：调整 clip 的 startTime/endTime（时间轴上的位置）
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return false
 
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
+    const video = projectStore.getVideo(found.clip.videoId)
+    const maxEnd = video?.metadata?.duration || 100
 
-    const video = projectStore.getVideo(clip.videoId);
-    const maxEnd = video?.metadata?.duration || 100;
+    const startTime = Math.max(0, newStart)
+    const endTime = Math.min(maxEnd, Math.max(startTime + 0.1, newEnd))
 
-    clip.startTime = Math.max(0, newStart);
-    clip.endTime = Math.min(maxEnd, Math.max(newStart + 0.1, newEnd));
-
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return true;
+    timelineStore.updateClip(clipId, { startTime, endTime })
+    triggerSave()
+    return true
   }
 
   function duplicateClip(clipId) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return null;
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return null
+    const { clip, track } = found
 
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return null;
+    const duration = clip.endTime - clip.startTime
+    const newStart = clip.endTime + CLIP_DUPLICATE_GAP
 
-    const newClip = {
-      id: generateId('clip'),
-      videoId: clip.videoId,
-      startTime: clip.endTime + 0.5,
-      endTime: clip.endTime + 0.5 + (clip.endTime - clip.startTime),
-      trackIndex: track.id,
-      filters: [...clip.filters],
-      volume: clip.volume,
-      speed: clip.speed
-    };
+    const newClip = timelineStore.addClip(
+      track.id,
+      clip.videoId,
+      newStart,
+      newStart + duration
+    )
 
-    timelineStore.addClip(newClip, track.id);
-    triggerSave();
-    return newClip;
+    if (newClip) {
+      // 复制滤镜、音量、速度
+      timelineStore.updateClip(newClip.id, {
+        filters: JSON.parse(JSON.stringify(clip.filters)),
+        volume: clip.volume,
+        speed: clip.speed,
+        sourceStart: clip.sourceStart
+      })
+    }
+    triggerSave()
+    return newClip
   }
 
-  function addFilter(clipId, filterType, params = {}) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
+  // ===================== 滤镜 =====================
 
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
+  function addFilter(clipId, filterType, params = {}) {
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return false
 
     const filter = {
       id: generateId('filter'),
       type: filterType,
       params
-    };
-
-    clip.filters.push(filter);
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return filter;
+    }
+    timelineStore.addFilterToClip(clipId, filter)
+    triggerSave()
+    return filter
   }
 
   function removeFilter(clipId, filterId) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
-
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
-
-    clip.filters = clip.filters.filter(f => f.id !== filterId);
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return true;
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return false
+    const index = found.clip.filters.findIndex(f => f.id === filterId)
+    if (index === -1) return false
+    timelineStore.removeFilterFromClip(clipId, index)
+    triggerSave()
+    return true
   }
 
   function updateFilter(clipId, filterId, params) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
+    const found = timelineStore.findClipById(clipId)
+    if (!found) return false
 
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
+    const filter = found.clip.filters.find(f => f.id === filterId)
+    if (!filter) return false
 
-    const filter = clip.filters.find(f => f.id === filterId);
-    if (!filter) return false;
-
-    filter.params = { ...filter.params, ...params };
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return true;
+    filter.params = { ...filter.params, ...params }
+    triggerSave()
+    return true
   }
 
+  // ===================== 属性 =====================
+
   function setClipVolume(clipId, volume) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
-
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
-
-    clip.volume = Math.max(0, Math.min(1, volume));
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return true;
+    timelineStore.updateClip(clipId, {
+      volume: Math.max(0, Math.min(1, volume))
+    })
+    triggerSave()
+    return true
   }
 
   function setClipSpeed(clipId, speed) {
-    const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clipId));
-    if (!track) return false;
-
-    const clip = track.clips.find(c => c.id === clipId);
-    if (!clip) return false;
-
-    clip.speed = Math.max(0.1, Math.min(4, speed));
-    timelineStore.updateTrack(track.id, track);
-    triggerSave();
-    return true;
+    timelineStore.updateClip(clipId, {
+      speed: Math.max(0.1, Math.min(4, speed))
+    })
+    triggerSave()
+    return true
   }
 
-  function toggleMuteTrack(trackId) {
-    const track = timelineStore.tracks.find(t => t.id === trackId);
-    if (track) {
-      track.muted = !track.muted;
-      timelineStore.updateTrack(trackId, track);
-      triggerSave();
-    }
-  }
+  // ===================== 选择 =====================
 
   function selectClip(clipId, multiSelect = false) {
     if (multiSelect) {
-      const currentSelected = [...timelineStore.selectedClipIds];
+      const currentSelected = [...timelineStore.selectedClipIds]
       if (currentSelected.includes(clipId)) {
-        timelineStore.selectClips(currentSelected.filter(id => id !== clipId));
+        timelineStore.selectClips(currentSelected.filter(id => id !== clipId))
       } else {
-        timelineStore.selectClips([...currentSelected, clipId]);
+        timelineStore.selectClips([...currentSelected, clipId])
       }
     } else {
-      timelineStore.selectClips([clipId]);
+      timelineStore.selectClips([clipId])
     }
   }
 
   function selectTrack(trackId) {
-    timelineStore.selectTrack(trackId);
+    timelineStore.selectTrack(trackId)
   }
 
   function clearSelection() {
-    timelineStore.selectClips([]);
-    timelineStore.selectTrack(null);
+    timelineStore.selectClips([])
+    timelineStore.selectTrack(null)
   }
 
+  // ===================== 历史 =====================
+
   function undo() {
-    timelineStore.undo();
-    triggerSave();
+    const result = timelineStore.undo()
+    if (result) triggerSave()
+    return result
   }
 
   function redo() {
-    timelineStore.redo();
-    triggerSave();
+    const result = timelineStore.redo()
+    if (result) triggerSave()
+    return result
   }
 
   return {
     selectedTrack,
     selectedClips,
+
     addTrack,
     removeTrack,
+    toggleMuteTrack,
+
     addClip,
     removeClip,
     moveClip,
     splitClip,
     trimClip,
     duplicateClip,
+
     addFilter,
     removeFilter,
     updateFilter,
+
     setClipVolume,
     setClipSpeed,
-    toggleMuteTrack,
+
     selectClip,
     selectTrack,
     clearSelection,
+
     undo,
     redo
-  };
+  }
 }

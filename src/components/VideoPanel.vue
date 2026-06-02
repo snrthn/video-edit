@@ -128,23 +128,18 @@ function handleDragEnd() {
 }
 
 function addToTimeline(videoId) {
-  const trackIndex = timelineStore.tracks.findIndex(t => t.type === 'video')
-  if (trackIndex === -1) {
-    timelineStore.addTrack('video')
+  let targetTrack = timelineStore.tracks.find(t => t.type === 'video')
+  if (!targetTrack) {
+    targetTrack = timelineStore.addTrack('video')
   }
-  const targetTrackIndex = timelineStore.tracks.findIndex(t => t.type === 'video')
   const video = projectStore.getVideo(videoId)
-  if (video) {
-    timelineStore.addClip({
-      id: `clip_${Date.now()}`,
+  if (video && targetTrack) {
+    timelineStore.addClip(
+      targetTrack.id,
       videoId,
-      startTime: 0,
-      endTime: video.metadata?.duration || 10,
-      trackIndex: targetTrackIndex,
-      filters: [],
-      volume: 1,
-      speed: 1
-    }, targetTrackIndex)
+      0,
+      video.metadata?.duration || 10
+    )
   }
 }
 

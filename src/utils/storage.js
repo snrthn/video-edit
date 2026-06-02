@@ -10,130 +10,110 @@ class VideoEditStorage {
       const request = indexedDB.open(this.dbName, this.dbVersion)
 
       request.onerror = () => reject(request.error)
-
       request.onsuccess = () => {
         this.db = request.result
         resolve(this.db)
       }
-
       request.onupgradeneeded = (event) => {
         const db = event.target.result
-
         if (!db.objectStoreNames.contains('projects')) {
           const projectStore = db.createObjectStore('projects', { keyPath: 'id' })
           projectStore.createIndex('updatedAt', 'updatedAt', { unique: false })
         }
-
         if (!db.objectStoreNames.contains('videos')) {
           const videoStore = db.createObjectStore('videos', { keyPath: 'id' })
           videoStore.createIndex('projectId', 'projectId', { unique: false })
           videoStore.createIndex('addedAt', 'addedAt', { unique: false })
         }
-
         if (!db.objectStoreNames.contains('timelines')) {
-          const timelineStore = db.createObjectStore('timelines', { keyPath: 'projectId' })
+          db.createObjectStore('timelines', { keyPath: 'projectId' })
         }
-
         if (!db.objectStoreNames.contains('videoData')) {
-          const videoDataStore = db.createObjectStore('videoData', { keyPath: 'videoId' })
+          db.createObjectStore('videoData', { keyPath: 'videoId' })
         }
       }
     })
   }
 
   async close() {
-    if (this.db) {
-      this.db.close()
-      this.db = null
-    }
+    if (this.db) { this.db.close(); this.db = null }
+  }
+
+  async ensureOpen() {
+    if (!this.db) await this.open()
   }
 
   serializeData(data) {
     return JSON.parse(JSON.stringify(data, (key, value) => {
-      if (value instanceof Blob) {
-        return undefined
-      }
-      if (value instanceof File) {
-        return undefined
-      }
-      if (typeof value === 'function') {
-        return undefined
-      }
+      if (value instanceof Blob) return undefined
+      if (value instanceof File) return undefined
+      if (typeof value === 'function') return undefined
       return value
     }))
   }
 
+  // === Projects ===
+
   async addProject(project) {
     await this.ensureOpen()
-    const cleanProject = this.serializeData(project)
-
+    const clean = this.serializeData(project)
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['projects'], 'readwrite')
-      const store = transaction.objectStore('projects')
-      const request = store.put(cleanProject)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['projects'], 'readwrite')
+      const req = tx.objectStore('projects').put(clean)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async getProject(projectId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['projects'], 'readonly')
-      const store = transaction.objectStore('projects')
-      const request = store.get(projectId)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['projects'], 'readonly')
+      const req = tx.objectStore('projects').get(projectId)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async getAllProjects() {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['projects'], 'readonly')
-      const store = transaction.objectStore('projects')
-      const request = store.getAll()
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['projects'], 'readonly')
+      const req = tx.objectStore('projects').getAll()
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async deleteProject(projectId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['projects', 'videos', 'timelines', 'videoData'], 'readwrite')
-      const projectStore = transaction.objectStore('projects')
-      const videoStore = transaction.objectStore('videos')
-      const timelineStore = transaction.objectStore('timelines')
-      const videoDataStore = transaction.objectStore('videoData')
+      const tx = this.db.transaction(['projects', 'videos', 'timelines', 'videoData'], 'readwrite')
+      const ps = tx.objectStore('projects')
+      const vs = tx.objectStore('videos')
+      const ts = tx.objectStore('timelines')
+      const vd = tx.objectStore('videoData')
 
-      projectStore.delete(projectId)
+      ps.delete(projectId)
+      ts.delete(projectId)
 
-      const videoRequest = videoStore.index('projectId').getAll(projectId)
-      videoRequest.onsuccess = (event) => {
-        event.target.result.forEach(video => {
-          videoDataStore.delete(video.id)
-        })
+      const vr = vs.index('projectId').getAll(projectId)
+      vr.onsuccess = (e) => e.target.result.forEach(v => vd.delete(v.id))
+
+      vs.index('projectId').openCursor(projectId).onsuccess = (e) => {
+        const cursor = e.target.result
+        if (cursor) { cursor.delete(); cursor.continue() }
       }
 
-      videoStore.index('projectId').openCursor(projectId).onsuccess = (event) => {
-        const cursor = event.target.result
-        if (cursor) {
-          cursor.delete()
-          cursor.continue()
-        }
-      }
-
-      timelineStore.delete(projectId)
-
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () => reject(transaction.error)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
     })
   }
 
+  // === Videos ===
+
   async addVideo(video, projectId) {
     await this.ensureOpen()
-
     const videoCopy = { ...video, projectId }
     const blobToSave = video.source?.blob
 
@@ -144,70 +124,58 @@ class VideoEditStorage {
       delete videoCopy.source.url
     }
 
-    const cleanVideo = this.serializeData(videoCopy)
-
+    const clean = this.serializeData(videoCopy)
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['videos'], 'readwrite')
-      const store = transaction.objectStore('videos')
-      const request = store.put(cleanVideo)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['videos'], 'readwrite')
+      const req = tx.objectStore('videos').put(clean)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async getVideosByProject(projectId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['videos'], 'readonly')
-      const store = transaction.objectStore('videos')
-      const index = store.index('projectId')
-      const request = index.getAll(projectId)
-      request.onsuccess = async (event) => {
-        const videos = event.target.result || []
-        const loadedVideos = await Promise.all(videos.map(video => this.restoreVideoBlob(video)))
-        resolve(loadedVideos)
+      const tx = this.db.transaction(['videos'], 'readonly')
+      const req = tx.objectStore('videos').index('projectId').getAll(projectId)
+      req.onsuccess = async (e) => {
+        const videos = e.target.result || []
+        resolve(await Promise.all(videos.map(v => this.restoreVideoBlob(v))))
       }
-      request.onerror = () => reject(request.error)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async deleteVideo(videoId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['videos', 'videoData'], 'readwrite')
-      const videoStore = transaction.objectStore('videos')
-      const videoDataStore = transaction.objectStore('videoData')
-
-      videoStore.delete(videoId)
-      videoDataStore.delete(videoId)
-
-      transaction.oncomplete = () => resolve()
-      transaction.onerror = () => reject(transaction.error)
+      const tx = this.db.transaction(['videos', 'videoData'], 'readwrite')
+      tx.objectStore('videos').delete(videoId)
+      tx.objectStore('videoData').delete(videoId)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
     })
   }
+
+  // === Video Blobs ==
 
   async saveVideoBlob(videoId, blob) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['videoData'], 'readwrite')
-      const store = transaction.objectStore('videoData')
-      const request = store.put({ videoId, blob })
-      request.onsuccess = () => resolve()
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['videoData'], 'readwrite')
+      const req = tx.objectStore('videoData').put({ videoId, blob })
+      req.onsuccess = () => resolve()
+      req.onerror = () => reject(req.error)
     })
   }
 
   async getVideoBlob(videoId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['videoData'], 'readonly')
-      const store = transaction.objectStore('videoData')
-      const request = store.get(videoId)
-      request.onsuccess = () => {
-        const data = request.result
-        resolve(data ? data.blob : null)
-      }
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['videoData'], 'readonly')
+      const req = tx.objectStore('videoData').get(videoId)
+      req.onsuccess = () => resolve(req.result?.blob ?? null)
+      req.onerror = () => reject(req.error)
     })
   }
 
@@ -223,43 +191,37 @@ class VideoEditStorage {
     return video
   }
 
+  // === Timeline ===
+
   async saveTimeline(projectId, timelineData) {
     await this.ensureOpen()
-    const cleanData = this.serializeData(timelineData)
-
+    const clean = this.serializeData(timelineData)
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['timelines'], 'readwrite')
-      const store = transaction.objectStore('timelines')
-      const request = store.put({ projectId, ...cleanData })
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['timelines'], 'readwrite')
+      const req = tx.objectStore('timelines').put({ projectId, ...clean })
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
   }
 
   async getTimeline(projectId) {
     await this.ensureOpen()
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['timelines'], 'readonly')
-      const store = transaction.objectStore('timelines')
-      const request = store.get(projectId)
-      request.onsuccess = () => resolve(request.result)
-      request.onerror = () => reject(request.error)
+      const tx = this.db.transaction(['timelines'], 'readonly')
+      const req = tx.objectStore('timelines').get(projectId)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
     })
-  }
-
-  async ensureOpen() {
-    if (!this.db) {
-      await this.open()
-    }
   }
 }
 
 export const storage = new VideoEditStorage()
 
+// === Store <-> DB 同步 ===
+
 export async function syncStoreWithDB(projectStore, timelineStore) {
   try {
     const projects = await storage.getAllProjects()
-
     if (projects.length > 0) {
       const latestProject = projects.reduce((latest, p) =>
         p.updatedAt > latest.updatedAt ? p : latest
@@ -269,15 +231,15 @@ export async function syncStoreWithDB(projectStore, timelineStore) {
 
       const videos = await storage.getVideosByProject(latestProject.id)
       videos.forEach(video => {
-        const { projectId, ...videoWithoutProject } = video
-        projectStore.videos.set(video.id, videoWithoutProject)
+        const { projectId, ...v } = video
+        projectStore.videos.set(v.id, v)
       })
 
       const timeline = await storage.getTimeline(latestProject.id)
       if (timeline) {
-        timelineStore.tracks = timeline.tracks ? JSON.parse(JSON.stringify(timeline.tracks)) : []
-        timelineStore.playheadPosition = 0
-        timelineStore.zoom = timeline.zoom || 100
+        timelineStore.setTracksFromDB(timeline.tracks)
+        timelineStore.playheadPosition = timeline.playheadPosition || 0
+        if (timeline.zoom) timelineStore.setZoom(timeline.zoom)
       }
     }
   } catch (error) {
@@ -298,13 +260,12 @@ export async function syncDBWithStore(projectStore, timelineStore) {
         await storage.deleteVideo(dbVideo.id)
       }
     }
-
     for (const video of videoList) {
       await storage.addVideo(video, projectStore.project.id)
     }
 
     await storage.saveTimeline(projectStore.project.id, {
-      tracks: timelineStore.tracks,
+      tracks: timelineStore.getCleanTracks(),
       playheadPosition: timelineStore.playheadPosition,
       zoom: timelineStore.zoom
     })

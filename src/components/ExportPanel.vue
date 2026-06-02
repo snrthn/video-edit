@@ -79,7 +79,7 @@
 import { ref, reactive, computed } from 'vue'
 import { useExport } from '../hooks/useExport'
 
-const { isExporting, currentJob, createExportJob, startExport, cancelExport } = useExport()
+const { isExporting, currentJob, startExport, cancelExport } = useExport()
 
 const showPanel = ref(false)
 
@@ -120,13 +120,11 @@ function applyResolution(res) {
 
 async function handleStartExport() {
   try {
-    const job = await createExportJob({
-      name: `导出_${Date.now()}`,
+    await startExport({
       format: settings.format,
       quality: settings.quality,
       resolution: settings.resolution
     })
-    await startExport(job.id)
   } catch (error) {
     console.error('Export failed:', error)
   }

@@ -17,11 +17,14 @@
 </template>
 
 <script setup>
+import { useKeyboard } from '../composables/useKeyboard'
 import Toolbar from './Toolbar.vue'
 import VideoPanel from './VideoPanel.vue'
 import VideoPlayer from './VideoPlayer.vue'
 import Timeline from './Timeline.vue'
 import ExportPanel from './ExportPanel.vue'
+
+useKeyboard()
 </script>
 
 <style scoped>
