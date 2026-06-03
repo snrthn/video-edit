@@ -22,9 +22,12 @@ export function usePlayhead({ timelineBodyRef, scrollContainerRef }) {
     if (e.target.closest('.track-label')) return
     if (e.target.closest('.playhead-head')) return // 播放头拖拽由 playhead mousedown 处理
 
+    const bodyRect = timelineBodyRef.value?.getBoundingClientRect()
     const scrollL = scrollContainerRef.value?.scrollLeft || 0
-    const x = e.clientX - 80 + scrollL // 80 = track label width
-    const time = Math.max(0, engine.pixelToTime(x))
+    // bodyX = 点击位置相对于 timeline-body 的像素（含滚动偏移）
+    // pixelToTime 内部会减去 TRACK_LABEL_WIDTH，外部不应再减
+    const bodyX = (bodyRect ? e.clientX - bodyRect.left : 0) + scrollL
+    const time = Math.max(0, engine.pixelToTime(bodyX))
 
     timelineStore.setPlayheadPosition(time)
 

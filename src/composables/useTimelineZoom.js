@@ -25,6 +25,7 @@ export function useTimelineZoom({ scrollContainerRef }) {
   function onSliderZoom(level) {
     engine.setZoom(level * BASE_PPS)
     timelineStore.syncZoomFromEngine()
+    triggerSave()
   }
 
   // ===================== Ctrl+滚轮缩放 =====================
@@ -51,6 +52,7 @@ export function useTimelineZoom({ scrollContainerRef }) {
     // 缩放后调整 scrollLeft，保持鼠标位置的时间不变
     const newPixelOfTime = engine.timeToPixel(timeAtMouse)
     container.scrollLeft = Math.max(0, newPixelOfTime - mouseX)
+    triggerSave()
   }
 
   // ===================== 缩放归位 =====================

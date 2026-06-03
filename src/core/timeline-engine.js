@@ -42,17 +42,33 @@ export class TimelineEngine {
   }
 
   // =========================================================
-  // 坐标换算 — 唯一入口
+  // 坐标换算
   // =========================================================
+  //
+  // 两套换算：
+  //   timeToPixel / pixelToTime  — 含 TRACK_LABEL_WIDTH 偏移
+  //                                 用于 TimeRuler、Playhead（在 timeline-body 层面）
+  //   clipTimeToPixel / clipPixelToTime — 不含偏移
+  //                                 用于 ClipBlock、框选（在 track-clips 内部）
 
-  /** 时间 → 像素位置 */
+  /** 时间 → 像素（含 label 偏移，用于 timeline-body 层面的元素） */
   timeToPixel(time) {
     return +(TRACK_LABEL_WIDTH + time * this.pps).toFixed(2)
   }
 
-  /** 像素位置 → 时间（仅返回 ≥ 0 的值） */
+  /** 像素 → 时间（含 label 偏移） */
   pixelToTime(px) {
     return +Math.max(0, (px - TRACK_LABEL_WIDTH) / this.pps).toFixed(4)
+  }
+
+  /** 时间 → 像素（不含 label 偏移，用于 clip 区域内部定位） */
+  clipTimeToPixel(time) {
+    return +(time * this.pps).toFixed(2)
+  }
+
+  /** 像素 → 时间（不含 label 偏移，用于 clip 区域内部换算） */
+  clipPixelToTime(px) {
+    return +Math.max(0, px / this.pps).toFixed(4)
   }
 
   // =========================================================
@@ -64,7 +80,7 @@ export class TimelineEngine {
    * @returns {{ left: number, width: number }}
    */
   getClipRect(clip) {
-    const left = this.timeToPixel(clip.startTime)
+    const left = this.clipTimeToPixel(clip.startTime)
     const duration = clip.endTime - clip.startTime
     const width = Math.max(duration * this.pps, CLIP_MIN_WIDTH)
     return { left: +left.toFixed(2), width: +width.toFixed(2) }

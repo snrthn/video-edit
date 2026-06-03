@@ -51,22 +51,28 @@ export function useSelection({ timelineBodyRef, scrollContainerRef }) {
     timelineStore.selectTrack(null)
 
     // 开始框选
-    const rect = timelineBodyRef.value?.getBoundingClientRect()
-    if (!rect) return
+    const bodyRect = timelineBodyRef.value?.getBoundingClientRect()
+    if (!bodyRect) return
 
     const scrollLeft = scrollContainerRef.value?.scrollLeft || 0
     const scrollTop = scrollContainerRef.value?.scrollTop || 0
 
+    // 直接存相对于 timeline-body 的坐标（已加滚动偏移），视觉矩形无需再换算
+    const relX = e.clientX - bodyRect.left + scrollLeft
+    const relY = e.clientY - bodyRect.top + scrollTop
+
     isRectSelecting.value = true
     selectionRect.value = {
-      x1: e.clientX,
-      y1: e.clientY,
-      x2: e.clientX,
-      y2: e.clientY,
-      originX: e.clientX,
-      originY: e.clientY,
-      scrollLeft,
-      scrollTop
+      x1: relX,
+      y1: relY,
+      x2: relX,
+      y2: relY,
+      _clientX1: e.clientX,
+      _clientY1: e.clientY,
+      _bodyLeft: bodyRect.left,
+      _bodyTop: bodyRect.top,
+      _scrollLeft: scrollLeft,
+      _scrollTop: scrollTop
     }
 
     document.addEventListener('mousemove', onRectMouseMove)
@@ -75,10 +81,13 @@ export function useSelection({ timelineBodyRef, scrollContainerRef }) {
 
   function onRectMouseMove(e) {
     if (!selectionRect.value || !isRectSelecting.value) return
+    const s = selectionRect.value
+    const dx = e.clientX - s._clientX1
+    const dy = e.clientY - s._clientY1
     selectionRect.value = {
-      ...selectionRect.value,
-      x2: e.clientX,
-      y2: e.clientY
+      ...s,
+      x2: s.x1 + dx,
+      y2: s.y1 + dy
     }
   }
 
@@ -104,15 +113,11 @@ export function useSelection({ timelineBodyRef, scrollContainerRef }) {
       return
     }
 
-    // 转换为时间轴坐标
-    const bodyRect = timelineBodyRef.value.getBoundingClientRect()
-    const scrollL = scrollContainerRef.value?.scrollLeft || 0
-    const scrollT = scrollContainerRef.value?.scrollTop || 0
-
-    const x1 = Math.min(rect.x1, rect.x2) - bodyRect.left + scrollL
-    const x2 = Math.max(rect.x1, rect.x2) - bodyRect.left + scrollL
-    const y1 = Math.min(rect.y1, rect.y2) - bodyRect.top + scrollT
-    const y2 = Math.max(rect.y1, rect.y2) - bodyRect.top + scrollT
+    // 坐标已经是 timeline-body 相对坐标（含滚动偏移），直接使用
+    const x1 = Math.min(rect.x1, rect.x2)
+    const x2 = Math.max(rect.x1, rect.x2)
+    const y1 = Math.min(rect.y1, rect.y2)
+    const y2 = Math.max(rect.y1, rect.y2)
 
     const timeStart = engine.pixelToTime(x1)
     const timeEnd = engine.pixelToTime(x2)
@@ -120,22 +125,23 @@ export function useSelection({ timelineBodyRef, scrollContainerRef }) {
     // 找出矩形范围内的 clips
     const selectedIds = []
     const timelineBody = timelineBodyRef.value
-    const trackEls = timelineBody.querySelectorAll('.track')
+    const bodyRect = timelineBody.getBoundingClientRect()
 
-    trackEls.forEach((trackEl, index) => {
+    timelineStore.tracks.forEach((track, index) => {
+      const trackEl = timelineBody.querySelectorAll('.track')[index]
+      if (!trackEl) return
+
       const trackRect = trackEl.getBoundingClientRect()
-      const trackTop = trackRect.top - bodyRect.top + scrollT
+      const trackTop = trackRect.top - bodyRect.top + (scrollContainerRef.value?.scrollTop || 0)
       const trackBottom = trackTop + trackRect.height
 
       // Y 方向相交检测
       if (trackBottom >= y1 && trackTop <= y2) {
-        const track = timelineStore.tracks[index]
-        if (!track) return
-
         track.clips.forEach(clip => {
-          const clipEndTime = clip.endTime
-          // X 方向相交检测
-          if (clip.endTime >= timeStart && clip.startTime <= timeEnd) {
+          // X 方向：用 engine 转为像素再做相交检测
+          const clipLeft = engine.timeToPixel(clip.startTime)
+          const clipRight = engine.timeToPixel(clip.endTime)
+          if (clipRight > x1 && clipLeft < x2) {
             selectedIds.push(clip.id)
           }
         })

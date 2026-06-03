@@ -5,6 +5,7 @@ import {
   PLAYHEAD_MOVE_STEP, PLAYHEAD_REACH_THRESHOLD,
   PLAYHEAD_MOVE_GAP_THRESHOLD, CLIP_SWITCH_DELAY
 } from '../core/constants'
+import { triggerSave } from '../main'
 
 export function usePlayer() {
   const playerStore = usePlayerStore()
@@ -253,6 +254,7 @@ export function usePlayer() {
   function pause() {
     stopPlayheadMove()
     if (videoRef.value) videoRef.value.pause()
+    triggerSave()
   }
 
   function stop() {
@@ -260,6 +262,7 @@ export function usePlayer() {
     if (!videoRef.value) return
     videoRef.value.pause()
     seek(0)
+    triggerSave()
   }
 
   function seek(time) {

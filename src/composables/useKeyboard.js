@@ -61,6 +61,7 @@ export function useKeyboard() {
       e.preventDefault()
       ids.forEach(id => timelineStore.removeClip(id))
       timelineStore.selectClips([])
+      triggerSave()
     },
     'Backspace'(e) {
       // 不在输入框内时才触发
@@ -71,6 +72,7 @@ export function useKeyboard() {
       e.preventDefault()
       ids.forEach(id => timelineStore.removeClip(id))
       timelineStore.selectClips([])
+      triggerSave()
     },
 
     // 全选

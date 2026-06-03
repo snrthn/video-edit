@@ -31,6 +31,7 @@
         @dragover.prevent="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
+        @click="onTimelineClick"
         @mousedown="handleEmptyAreaMouseDown"
       >
         <!-- 时间刻度尺 -->
@@ -69,10 +70,12 @@
             :is-selected="track.id === timelineStore.selectedTrackId"
             :selected-clip-ids="timelineStore.selectedClipIds"
             :dragging-clip-id="isDragging ? dragState?.clipId : null"
+            :deletable="timelineStore.tracks.filter(t => t.type === track.type).length > 1"
             :get-video-name="getVideoName"
             :get-video-thumbnail="getVideoThumbnail"
             @select-track="timelineStore.selectTrack"
             @toggle-mute="handleToggleMute"
+            @delete-track="handleRemoveTrack"
             @click-clip="(id, e) => { handleClipClick(id, e) }"
             @dblclick-clip="handleClipDoubleClick"
             @mousedown-clip="onClipMouseDown"
@@ -108,6 +111,7 @@ import { useSelection } from '../composables/useSelection'
 import { usePlayhead } from '../composables/usePlayhead'
 import { useTimelineZoom } from '../composables/useTimelineZoom'
 import { engine } from '../core/timeline-engine'
+import { triggerSave } from '../main'
 import TimeRuler from './timeline/TimeRuler.vue'
 import TrackRow from './timeline/TrackRow.vue'
 import PlayheadLine from './timeline/PlayheadLine.vue'
@@ -117,7 +121,7 @@ import PlayheadLine from './timeline/PlayheadLine.vue'
 const timelineStore = useTimelineStore()
 const projectStore = useProjectStore()
 const playerStore = usePlayerStore()
-const { splitClip, duplicateClip, undo, redo } = useVideoEditor()
+const { splitClip, duplicateClip, undo, redo, addTrack, removeTrack } = useVideoEditor()
 const { seek: playerSeek, play, pause, loadClipVideo, findClipAtTime, findNextClip } = usePlayer()
 const { timeToPixel, getTimelineWidth, getPlayheadPixel } = useTimeGrid()
 
@@ -135,7 +139,7 @@ const {
 } = useClipDrag({ timelineBodyRef, scrollContainerRef })
 
 onCommit(() => {
-  // drag 提交后触发保存
+  triggerSave()
 })
 
 const {
@@ -179,6 +183,19 @@ const selectionRectStyle = computed(() => {
 
 // 初始化 engine zoom 与 store zoom 同步
 engine.setZoom(timelineStore.zoom * 100)
+
+// ===================== 点击时间轴跳转播放头 =====================
+
+function onTimelineClick(e) {
+  handleTimelineClick(e, {
+    findClipAtTime: (t) => {
+      const found = findClipAtTime(t)
+      return found ? { clip: found.clip } : null
+    },
+    loadClipVideo,
+    seek: playerSeek
+  })
+}
 
 // ===================== 拖入（从 VideoPanel 拖入时间轴） =====================
 
@@ -252,8 +269,9 @@ function getVideoThumbnail(videoId) {
 
 // ===================== 事件处理 =====================
 
-function handleAddVideoTrack() { timelineStore.addTrack('video') }
-function handleAddAudioTrack() { timelineStore.addTrack('audio') }
+function handleAddVideoTrack() { addTrack('video') }
+function handleAddAudioTrack() { addTrack('audio') }
+function handleRemoveTrack(trackId) { removeTrack(trackId) }
 function handleToggleMute(trackId) { timelineStore.toggleTrackMute(trackId) }
 
 function handleClipDoubleClick(clip) {
@@ -278,6 +296,7 @@ function handleDeleteClip() {
   const ids = [...timelineStore.selectedClipIds]
   ids.forEach(id => timelineStore.removeClip(id))
   timelineStore.selectClips([])
+  triggerSave()
 }
 
 function handleDuplicateClip() {

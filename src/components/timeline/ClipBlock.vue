@@ -81,9 +81,9 @@ function onMouseDown(e) {
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   background-color: #2a3f5f;
   user-select: none;
-  transition: border-color 0.15s;
+  transition: border-color 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
-.clip:hover { border-color: rgba(255,255,255,0.3); }
+.clip:hover { border-color: rgba(255,255,255,0.2); }
 .clip.selected {
   border-color: #e94560;
   box-shadow: 0 0 0 1px #e94560, 0 2px 8px rgba(233,69,96,0.3);
@@ -91,7 +91,7 @@ function onMouseDown(e) {
 .clip.dragging {
   cursor: grabbing;
   border-color: #4ade80;
-  transform: scale(1.02);
+  box-shadow: 0 0 0 2px #4ade80, 0 4px 12px rgba(74,222,128,0.3);
   z-index: 50;
 }
 .video-clip { background-color: #4a90d9; }
