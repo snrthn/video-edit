@@ -282,6 +282,7 @@ export function usePlayer() {
       playerStore.setCurrentTime(time)
       timelineStore.setPlayheadPosition(time)
     }
+    triggerSave()
   }
 
   function seekRelative(delta) {

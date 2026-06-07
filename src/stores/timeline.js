@@ -92,6 +92,7 @@ export const useTimelineStore = defineStore('timeline', () => {
       endTime: +(endTime).toFixed(4),
       sourceStart: 0,
       trackIndex: track ? tracks.value.indexOf(track) : 0,
+      linkedClipId: null,
       filters: [],
       volume: 1,
       speed: 1
@@ -193,6 +194,16 @@ export const useTimelineStore = defineStore('timeline', () => {
     const clip = makeClip(videoId, startTime, endTime, trackId)
     track.clips.push(clip)
     track.clips.sort((a, b) => a.startTime - b.startTime)
+
+    // Premiere Pro 模式：视频轨添加 clip 时自动创建关联音频 clip
+    if (track.type === 'video') {
+      const audioClip = _createLinkedAudioClip(clip)
+      if (audioClip) {
+        clip.linkedClipId = audioClip.id
+        audioClip.linkedClipId = clip.id
+      }
+    }
+
     updateDuration()
 
     saveCommand('添加剪辑片段',
@@ -202,13 +213,33 @@ export const useTimelineStore = defineStore('timeline', () => {
     return clip
   }
 
+  // 内部：创建关联音频 clip
+  function _createLinkedAudioClip(videoClip) {
+    let audioTrack = tracks.value.find(t => t.type === 'audio')
+    if (!audioTrack) {
+      audioTrack = addTrack('audio', '音频轨道 1')
+    }
+    if (!audioTrack) return null
+
+    const audioClip = makeClip(videoClip.videoId, videoClip.startTime, videoClip.endTime, audioTrack.id)
+    audioTrack.clips.push(audioClip)
+    audioTrack.clips.sort((a, b) => a.startTime - b.startTime)
+    return audioClip
+  }
+
   function removeClip(clipId) {
     const found = findClipById(clipId)
     if (!found) return
 
     const { clip, track } = found
+
+    // Premiere Pro 模式：同时删除关联的 linked clip
+    if (clip.linkedClipId) {
+      _removeClipSilent(clip.linkedClipId)
+    }
+
     const index = track.clips.indexOf(clip)
-    const removed = track.clips.splice(index, 1)[0]
+    track.clips.splice(index, 1)
     selectedClipIds.value = selectedClipIds.value.filter(id => id !== clipId)
     updateDuration()
 
@@ -223,15 +254,37 @@ export const useTimelineStore = defineStore('timeline', () => {
     )
   }
 
+  // 内部：静默删除（不触发 saveCommand）
+  function _removeClipSilent(clipId) {
+    for (const t of tracks.value) {
+      const idx = t.clips.findIndex(c => c.id === clipId)
+      if (idx !== -1) {
+        t.clips.splice(idx, 1)
+        selectedClipIds.value = selectedClipIds.value.filter(id => id !== clipId)
+        return
+      }
+    }
+  }
+
   function updateClip(clipId, updates) {
     const found = findClipById(clipId)
     if (!found) return
 
     const { clip, track } = found
-    const oldClip = { ...clip }
 
     Object.assign(clip, updates)
     track.clips.sort((a, b) => a.startTime - b.startTime)
+
+    // 同步时间变更到 linked clip（拖拽 & trim 时联动音频）
+    if (clip.linkedClipId && (updates.startTime !== undefined || updates.endTime !== undefined)) {
+      const linkedFound = findClipById(clip.linkedClipId)
+      if (linkedFound) {
+        if (updates.startTime !== undefined) linkedFound.clip.startTime = updates.startTime
+        if (updates.endTime !== undefined) linkedFound.clip.endTime = updates.endTime
+        linkedFound.track.clips.sort((a, b) => a.startTime - b.startTime)
+      }
+    }
+
     updateDuration()
 
     saveCommand('更新剪辑片段',
@@ -273,11 +326,38 @@ export const useTimelineStore = defineStore('timeline', () => {
       id: generateId('clip'),
       startTime: +splitTime.toFixed(4),
       endTime: originalEnd,
-      sourceStart: 0
+      sourceStart: 0,
+      linkedClipId: null
     }
 
     track.clips.push(newClip)
     track.clips.sort((a, b) => a.startTime - b.startTime)
+
+    // 同步分割 linked audio clip
+    if (clip.linkedClipId) {
+      const linkedFound = findClipById(clip.linkedClipId)
+      if (linkedFound) {
+        const linkedOriginalEnd = linkedFound.clip.endTime
+        linkedFound.clip.endTime = +splitTime.toFixed(4)
+
+        const linkedNewClip = {
+          ...JSON.parse(JSON.stringify(linkedFound.clip)),
+          id: generateId('clip'),
+          startTime: +splitTime.toFixed(4),
+          endTime: linkedOriginalEnd,
+          sourceStart: 0,
+          linkedClipId: null
+        }
+
+        linkedFound.track.clips.push(linkedNewClip)
+        linkedFound.track.clips.sort((a, b) => a.startTime - b.startTime)
+
+        // 建立新 clip 之间的链接
+        newClip.linkedClipId = linkedNewClip.id
+        linkedNewClip.linkedClipId = newClip.id
+      }
+    }
+
     updateDuration()
 
     saveCommand('分割剪辑片段',
@@ -300,6 +380,9 @@ export const useTimelineStore = defineStore('timeline', () => {
     if (!targetTrack || targetTrack.locked) return
     if (sourceTrack.type !== targetTrack.type) return
 
+    const oldStartTime = clip.startTime
+    const timeDelta = newStartTime - oldStartTime
+
     const clipData = { ...clip }
     sourceTrack.clips = sourceTrack.clips.filter(c => c.id !== clipId)
 
@@ -309,6 +392,17 @@ export const useTimelineStore = defineStore('timeline', () => {
 
     targetTrack.clips.push(clipData)
     targetTrack.clips.sort((a, b) => a.startTime - b.startTime)
+
+    // 同步移动 linked audio clip
+    if (clipData.linkedClipId) {
+      const linkedFound = findClipById(clipData.linkedClipId)
+      if (linkedFound) {
+        linkedFound.clip.startTime = Math.max(0, +(linkedFound.clip.startTime + timeDelta).toFixed(4))
+        linkedFound.clip.endTime = +(linkedFound.clip.startTime + (linkedFound.clip.endTime - linkedFound.clip.startTime)).toFixed(4)
+        linkedFound.track.clips.sort((a, b) => a.startTime - b.startTime)
+      }
+    }
+
     updateDuration()
 
     saveCommand('移动剪辑片段',

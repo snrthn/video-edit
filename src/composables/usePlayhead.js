@@ -8,6 +8,7 @@
 import { ref } from 'vue'
 import { useTimelineStore } from '../stores'
 import { engine } from '../core/timeline-engine'
+import { triggerSave } from '../main'
 
 export function usePlayhead({ timelineBodyRef, scrollContainerRef }) {
   const timelineStore = useTimelineStore()
@@ -30,6 +31,7 @@ export function usePlayhead({ timelineBodyRef, scrollContainerRef }) {
     const time = Math.max(0, engine.pixelToTime(bodyX))
 
     timelineStore.setPlayheadPosition(time)
+    triggerSave()
 
     if (findClipAtTime && loadClipVideo && seek) {
       const found = findClipAtTime(time)
@@ -72,6 +74,7 @@ export function usePlayhead({ timelineBodyRef, scrollContainerRef }) {
       isDraggingPlayhead.value = false
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
+      triggerSave()
     }
 
     document.addEventListener('mousemove', onMove)

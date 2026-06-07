@@ -23,25 +23,37 @@
       </div>
     </div>
     <div class="track-clips" ref="clipArea">
-      <ClipBlock
-        v-for="clip in track.clips"
-        :key="clip.id"
-        :clip="clip"
-        :track-type="track.type"
-        :name="getVideoName(clip.videoId)"
-        :thumbnail="getVideoThumbnail(clip.videoId)"
-        :selected="selectedClipIds.includes(clip.id)"
-        :is-drag-active="draggingClipId === clip.id"
-        @click="(id, e) => $emit('click-clip', id, e)"
-        @dblclick="(c) => $emit('dblclick-clip', c)"
-        @mousedown="(e, c) => $emit('mousedown-clip', e, c, track)"
-      />
+      <template v-for="clip in track.clips" :key="clip.id">
+        <ClipBlock
+          v-if="track.type === 'video'"
+          :clip="clip"
+          :track-type="track.type"
+          :name="getVideoName(clip.videoId)"
+          :thumbnail="getVideoThumbnail(clip.videoId)"
+          :selected="selectedClipIds.includes(clip.id)"
+          :is-drag-active="draggingClipId === clip.id"
+          @click="(id, e) => $emit('click-clip', id, e)"
+          @dblclick="(c) => $emit('dblclick-clip', c)"
+          @mousedown="(e, c) => $emit('mousedown-clip', e, c, track)"
+        />
+        <AudioClipBlock
+          v-else-if="track.type === 'audio'"
+          :clip="clip"
+          :name="getVideoName(clip.videoId)"
+          :selected="selectedClipIds.includes(clip.id)"
+          :is-drag-active="draggingClipId === clip.id"
+          @click="(id, e) => $emit('click-clip', id, e)"
+          @dblclick="(c) => $emit('dblclick-clip', c)"
+          @mousedown="(e, c) => $emit('mousedown-clip', e, c, track)"
+        />
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
 import ClipBlock from './ClipBlock.vue'
+import AudioClipBlock from './AudioClipBlock.vue'
 
 defineProps({
   track: { type: Object, required: true },
