@@ -5,7 +5,7 @@
         <video
           ref="videoRef"
           class="video-element"
-          :class="{ hidden: !hasVideoAtPosition && isPlayheadMoving }"
+          preload="auto"
           @timeupdate="handleTimeUpdate"
           @loadedmetadata="handleLoadedMetadata"
           @progress="handleProgress"
@@ -13,12 +13,15 @@
           您的浏览器不支持视频播放
         </video>
 
+        <!-- 空白区域黑屏遮罩 -->
+        <div v-if="!hasVideoAtPosition" class="black-screen" />
+
         <div v-if="showPreviewThumbnail" class="preview-thumbnail">
           <img :src="nextClipThumbnail" alt="下一个视频预览" class="thumbnail-image" />
           <div class="preview-label">即将播放: {{ nextClipName }}</div>
         </div>
 
-        <div v-if="!hasVideoAtPosition && !isPlayheadMoving && !nextClip" class="empty-player">
+        <div v-if="!hasVideoAtPosition && !nextClip && !isPlayheadMoving" class="empty-player">
           <div class="empty-icon">🎬</div>
           <p>在时间线上添加视频后即可预览</p>
         </div>
@@ -26,7 +29,7 @@
 
       <div class="player-controls">
         <div class="time-display">
-          {{ formatTime(playerStore.currentTime) }} / {{ formatTime(playerStore.duration) }}
+          {{ formatTime(timelineStore.playheadPosition) }} / {{ formatTime(timelineStore.duration) }}
         </div>
 
         <div class="control-buttons">
@@ -65,9 +68,8 @@
       </div>
 
       <div class="progress-bar" @click="handleProgressClick">
-        <div class="progress-buffered" :style="{ width: `${playerStore.buffered * 100}%` }"></div>
-        <div class="progress-played" :style="{ width: `${playerStore.progress}%` }"></div>
-        <div class="progress-handle" :style="{ left: `${playerStore.progress}%` }"></div>
+        <div class="progress-played" :style="{ width: `${timelineProgress}%` }"></div>
+        <div class="progress-handle" :style="{ left: `${timelineProgress}%` }"></div>
       </div>
     </div>
   </div>
@@ -166,12 +168,17 @@ function handleSpeedChange(e) {
   setPlaybackRate(parseFloat(e.target.value))
 }
 
+// timeline 座标的进度百分比
+const timelineProgress = computed(() => {
+  const dur = timelineStore.duration || 1
+  return Math.min((timelineStore.playheadPosition / dur) * 100, 100)
+})
+
 function handleProgressClick(e) {
   const rect = e.currentTarget.getBoundingClientRect()
   const percent = (e.clientX - rect.left) / rect.width
-  const clipDuration = playerStore.duration || 1
-  const time = percent * clipDuration
-  seek(timelineStore.playheadPosition + time - playerStore.currentTime)
+  const time = percent * (timelineStore.duration || 1)
+  seek(time)
 }
 
 function handleTimeUpdate() {
@@ -275,6 +282,13 @@ onUnmounted(() => {
   position: absolute;
   text-align: center;
   color: #666;
+}
+
+.black-screen {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 5;
 }
 
 .empty-icon {

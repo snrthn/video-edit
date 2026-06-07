@@ -321,12 +321,15 @@ export const useTimelineStore = defineStore('timeline', () => {
     const originalEnd = clip.endTime
     clip.endTime = +splitTime.toFixed(4)
 
+    // 后半段的 source 偏移 = 原 sourceStart + 分割点在 clip 内的偏移
+    const secondHalfSourceStart = clip.sourceStart + (splitTime - clip.startTime)
+
     const newClip = {
       ...JSON.parse(JSON.stringify(clip)),
       id: generateId('clip'),
       startTime: +splitTime.toFixed(4),
       endTime: originalEnd,
-      sourceStart: 0,
+      sourceStart: +secondHalfSourceStart.toFixed(4),
       linkedClipId: null
     }
 
@@ -340,12 +343,14 @@ export const useTimelineStore = defineStore('timeline', () => {
         const linkedOriginalEnd = linkedFound.clip.endTime
         linkedFound.clip.endTime = +splitTime.toFixed(4)
 
+        const linkedSecondHalfSourceStart = linkedFound.clip.sourceStart + (splitTime - linkedFound.clip.startTime)
+
         const linkedNewClip = {
           ...JSON.parse(JSON.stringify(linkedFound.clip)),
           id: generateId('clip'),
           startTime: +splitTime.toFixed(4),
           endTime: linkedOriginalEnd,
-          sourceStart: 0,
+          sourceStart: +linkedSecondHalfSourceStart.toFixed(4),
           linkedClipId: null
         }
 

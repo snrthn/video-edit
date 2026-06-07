@@ -45,7 +45,7 @@
         <PlayheadLine
           :pixel-x="playheadPixel"
           :is-dragging="isDraggingPlayhead"
-          @mousedown="e => onPlayheadMouseDown(e, { findClipAtTime, loadClipVideo, seek: playerSeek })"
+          @mousedown="e => onPlayheadMouseDown(e, { scrub, clearPreview, freezeFrame })"
         />
 
         <!-- Drop 预览线 -->
@@ -122,7 +122,7 @@ const timelineStore = useTimelineStore()
 const projectStore = useProjectStore()
 const playerStore = usePlayerStore()
 const { splitClip, duplicateClip, undo, redo, addTrack, removeTrack } = useVideoEditor()
-const { seek: playerSeek, play, pause, loadClipVideo, findClipAtTime, findNextClip } = usePlayer()
+const { seek: playerSeek, scrub, clearPreview, freezeFrame, play, pause, loadClipVideo, findClipAtTime, findNextClip } = usePlayer()
 const { timeToPixel, getTimelineWidth, getPlayheadPixel } = useTimeGrid()
 
 // Refs
@@ -187,14 +187,7 @@ engine.setZoom(timelineStore.zoom * 100)
 // ===================== 点击时间轴跳转播放头 =====================
 
 function onTimelineClick(e) {
-  handleTimelineClick(e, {
-    findClipAtTime: (t) => {
-      const found = findClipAtTime(t)
-      return found ? { clip: found.clip } : null
-    },
-    loadClipVideo,
-    seek: playerSeek
-  })
+  handleTimelineClick(e, { freezeFrame })
 }
 
 // ===================== 拖入（从 VideoPanel 拖入时间轴） =====================

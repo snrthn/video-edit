@@ -76,10 +76,11 @@ async function drawWaveform() {
   const waveform = await getWaveformData(props.clip.videoId, video.source.url)
   if (!waveform) return
 
-  const viewDuration = props.clip.endTime - props.clip.startTime
+  const clipDuration = props.clip.endTime - props.clip.startTime
+  const sourceOffset = props.clip.sourceStart || 0
   renderWaveform(canvas, waveform.peaks, {
-    viewStartTime: props.clip.startTime,
-    viewDuration: waveform.duration,
+    viewStartTime: sourceOffset,
+    viewDuration: clipDuration,
     color: '#50c878'
   })
 }
