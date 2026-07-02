@@ -13,6 +13,12 @@
           您的浏览器不支持视频播放
         </video>
 
+        <!-- 文字叠加层 -->
+        <TextOverlay
+          :container-width="wrapperWidth"
+          :container-height="wrapperHeight"
+        />
+
         <!-- 空白区域黑屏遮罩 -->
         <div v-if="!hasVideoAtPosition" class="black-screen" />
 
@@ -76,9 +82,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'
 import { usePlayerStore, useTimelineStore, useProjectStore } from '../stores'
 import { usePlayer } from '../hooks/usePlayer'
+import TextOverlay from './TextOverlay.vue'
 
 const playerStore = usePlayerStore()
 const timelineStore = useTimelineStore()
@@ -87,12 +94,50 @@ const projectStore = useProjectStore()
 const videoRef = ref(null)
 const wrapperRef = ref(null)
 
+const wrapperWidth = ref(640)
+const wrapperHeight = ref(360)
+
+let resizeObserver = null
+
+onMounted(() => {
+  if (wrapperRef.value) {
+    wrapperWidth.value = wrapperRef.value.clientWidth || 640
+    wrapperHeight.value = wrapperRef.value.clientHeight || 360
+    resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        wrapperWidth.value = entry.contentRect.width
+        wrapperHeight.value = entry.contentRect.height
+      }
+    })
+    resizeObserver.observe(wrapperRef.value)
+  }
+  setupPlayer(videoRef.value)
+  // 页面刷新后：playhead 位置已恢复，video 元素刚挂载
+  // 主动加载当前 clip 并 seek，避免黑屏
+  if (videoRef.value && timelineStore.tracks.length > 0) {
+    scrub(timelineStore.playheadPosition)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (resizeObserver && wrapperRef.value) {
+    resizeObserver.unobserve(wrapperRef.value)
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (videoRef.value) {
+    videoRef.value.pause()
+    videoRef.value.src = ''
+  }
+})
+
 const {
   setupPlayer,
   play,
   pause,
   seek,
   seekRelative,
+  scrub,
   setVolume,
   toggleMute,
   setPlaybackRate,
@@ -104,6 +149,7 @@ const {
 const hasVideoAtPosition = computed(() => {
   const position = timelineStore.playheadPosition
   for (const track of timelineStore.tracks) {
+    if (track.type !== 'video') continue
     for (const clip of track.clips) {
       if (position >= clip.startTime && position < clip.endTime) {
         return true
@@ -112,6 +158,13 @@ const hasVideoAtPosition = computed(() => {
   }
   return false
 })
+
+// 监听播放头位置：暂停时主动 seek video，刷新后也能恢复画面
+watch(() => timelineStore.playheadPosition, (newPos) => {
+  if (!playerStore.isPlaying && videoRef.value) {
+    scrub(newPos)
+  }
+}, { immediate: true })
 
 const isPlayheadMoving = computed(() => {
   return checkPlayheadMoving()
@@ -190,6 +243,10 @@ function handleTimeUpdate() {
 function handleLoadedMetadata() {
   if (videoRef.value) {
     playerStore.setDuration(videoRef.value.duration)
+
+    // 页面刷新后，playhead 位置已从 IndexedDB 恢复
+    // video 加载完成后主动 seek 到该位置，避免黑屏
+    scrub(timelineStore.playheadPosition)
   }
 }
 
@@ -199,17 +256,6 @@ function handleProgress() {
     playerStore.setBuffered(buffered / playerStore.duration)
   }
 }
-
-onMounted(() => {
-  setupPlayer(videoRef.value)
-})
-
-onUnmounted(() => {
-  if (videoRef.value) {
-    videoRef.value.pause()
-    videoRef.value.src = ''
-  }
-})
 </script>
 
 <style scoped>

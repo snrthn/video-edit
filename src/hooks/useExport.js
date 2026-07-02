@@ -31,7 +31,20 @@ export function useExport() {
       exportStore.updateProgress(10, '初始化 FFmpeg')
       await ffmpeg.init()
 
+      // 先收集 clips，再取原尺寸
       const clips = collectClips()
+      const textClips = collectTextClips()  // 收集文字轨道
+
+      // 获取第一个视频 clip 的原尺寸，用于导出时保持宽高比
+      const firstClip = clips.find(c => c.videoId)
+      let sourceWidth, sourceHeight
+      if (firstClip) {
+        const video = projectStore.getVideo(firstClip.videoId)
+        if (video && video.source && video.source.width) {
+          sourceWidth = video.source.width
+          sourceHeight = video.source.height
+        }
+      }
       if (clips.length === 0) throw new Error('时间线上没有剪辑片段')
 
       exportStore.updateProgress(25, '裁剪片段')
@@ -44,14 +57,24 @@ export function useExport() {
         if (!video) throw new Error('视频素材不存在')
 
         const duration = clip.endTime - clip.startTime
-        finalBlob = await ffmpeg.trimAndExport(
+        const processedBlob = await ffmpeg.trimClip(
           video.source.url,
-          clip.sourceStart || 0,
-          duration,
-          settings
+          {
+            startTime: clip.sourceStart || 0,
+            duration,
+            filters: clip.filters || [],
+            speed: clip.speed || 1,
+            volume: clip.volume != null ? clip.volume : 1
+          }
         )
+        finalBlob = await ffmpeg.export(processedBlob, {
+          ...settings,
+          sourceWidth,
+          sourceHeight,
+          textClips  // 传入文字 clip 列表
+        })
       } else {
-        // 多片段：逐个裁剪 → 拼接 → 统一编码
+        // 多片段：逐个裁剪 + 特效 → 拼接 → 统一编码
         const segments = []
         const progressPerClip = 20 / clips.length
 
@@ -61,10 +84,15 @@ export function useExport() {
           if (!video) continue
 
           const duration = clip.endTime - clip.startTime
-          const segmentBlob = await ffmpeg.trim(
+          const segmentBlob = await ffmpeg.trimClip(
             video.source.url,
-            clip.sourceStart || 0,
-            duration
+            {
+              startTime: clip.sourceStart || 0,
+              duration,
+              filters: clip.filters || [],
+              speed: clip.speed || 1,
+              volume: clip.volume != null ? clip.volume : 1
+            }
           )
 
           const url = URL.createObjectURL(segmentBlob)
@@ -74,15 +102,25 @@ export function useExport() {
         }
 
         if (segments.length === 0) throw new Error('没有可导出的片段')
-        if (segments.length === 1) {
-          finalBlob = await ffmpeg.export(segments[0].url, settings)
-        } else {
-          exportStore.updateProgress(50, '拼接片段')
-          const mergedBlob = await ffmpeg.merge(segments)
+          if (segments.length === 1) {
+            finalBlob = await ffmpeg.export(segments[0].url, {
+              ...settings,
+              sourceWidth,
+              sourceHeight,
+              textClips
+            })
+          } else {
+            exportStore.updateProgress(50, '拼接片段')
+            const mergedBlob = await ffmpeg.merge(segments)
 
-          const mergedUrl = URL.createObjectURL(mergedBlob)
-          exportStore.updateProgress(60, '最终编码')
-          finalBlob = await ffmpeg.export(mergedUrl, settings)
+            const mergedUrl = URL.createObjectURL(mergedBlob)
+            exportStore.updateProgress(60, '最终编码')
+            finalBlob = await ffmpeg.export(mergedUrl, {
+              ...settings,
+              sourceWidth,
+              sourceHeight,
+              textClips
+            })
           URL.revokeObjectURL(mergedUrl)
         }
 
@@ -126,6 +164,19 @@ export function useExport() {
     return allClips
   }
 
+  function collectTextClips() {
+    // 收集所有文字轨上的 clip
+    const texts = []
+    timelineStore.tracks.forEach(track => {
+      if (track.type !== 'text') return
+      track.clips.forEach(clip => {
+        texts.push({ ...clip, trackId: track.id })
+      })
+    })
+    texts.sort((a, b) => a.startTime - b.startTime)
+    return texts
+  }
+
   function downloadFile(blob, name, format) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -141,6 +192,10 @@ export function useExport() {
     exportStore.clearHistory()
   }
 
+  function clearCurrentJob() {
+    exportStore.clearCurrentJob()
+  }
+
   function getDefaultSettings() {
     return exportStore.getDefaultSettings()
   }
@@ -153,6 +208,7 @@ export function useExport() {
     startExport,
     cancelExport,
     clearHistory,
+    clearCurrentJob,
     getDefaultSettings
   }
 }

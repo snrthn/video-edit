@@ -1,6 +1,6 @@
 <template>
   <div class="export-panel" v-if="showPanel">
-    <div class="export-overlay" @click="closePanel"></div>
+    <div class="export-overlay"></div>
     <div class="export-modal">
       <div class="modal-header">
         <h2>导出视频</h2>
@@ -49,7 +49,9 @@
       </div>
 
       <div class="modal-footer">
-        <button class="cancel-btn" @click="closePanel" :disabled="isExporting">取消</button>
+        <button class="cancel-btn" @click="closePanel">
+          {{ isExporting ? '取消导出' : '取消' }}
+        </button>
         <button
           class="export-btn"
           @click="handleStartExport"
@@ -57,6 +59,10 @@
         >
           {{ isExporting ? '导出中...' : '开始导出' }}
         </button>
+      </div>
+
+      <div v-if="currentJob && currentJob.error" class="export-error">
+        <span>导出失败：{{ currentJob.error }}</span>
       </div>
 
       <div v-if="isExporting && currentJob" class="export-progress">
@@ -79,14 +85,14 @@
 import { ref, reactive, computed } from 'vue'
 import { useExport } from '../hooks/useExport'
 
-const { isExporting, currentJob, startExport, cancelExport } = useExport()
+const { isExporting, currentJob, startExport, cancelExport, clearCurrentJob } = useExport()
 
 const showPanel = ref(false)
 
 const settings = reactive({
   format: 'mp4',
   quality: 'high',
-  resolution: '1080p'
+  resolution: 'original'
 })
 
 const formats = [
@@ -95,19 +101,25 @@ const formats = [
 ]
 
 const resolutions = [
+  { label: '与原视频相同', value: 'original' },
   { label: '1080p', value: '1080p' },
   { label: '720p', value: '720p' },
   { label: '480p', value: '480p' }
 ]
 
 function openPanel() {
+  if (currentJob.value && !isExporting.value) {
+    clearCurrentJob()
+  }
   showPanel.value = true
 }
 
 function closePanel() {
-  if (!isExporting.value) {
-    showPanel.value = false
+  if (isExporting.value) {
+    if (!confirm('导出正在进行中，确定要取消导出并关闭吗？')) return
+    cancelExport()
   }
+  showPanel.value = false
 }
 
 function isResolutionActive(res) {
@@ -132,11 +144,11 @@ async function handleStartExport() {
 
 function getStatusText(status) {
   const statusMap = {
-    pending: '等待中',
-    processing: '导出中...',
-    completed: '导出完成',
-    failed: '导出失败',
-    paused: '已暂停',
+    idle: '等待中',
+    preparing: '准备中',
+    encoding: '编码中',
+    complete: '导出完成',
+    error: '导出失败',
     cancelled: '已取消'
   }
   return statusMap[status] || status
@@ -335,6 +347,15 @@ defineExpose({ openPanel })
 .export-progress {
   padding: 16px 24px;
   border-top: 1px solid #1a1a2e;
+}
+
+.export-error {
+  padding: 12px 24px;
+  border-top: 1px solid #1a1a2e;
+  background-color: rgba(233, 69, 96, 0.08);
+  color: #e94560;
+  font-size: 13px;
+  word-break: break-all;
 }
 
 .progress-bar {

@@ -9,13 +9,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.21",
-    "pinia": "^2.1.7",
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
-    "idb": "^8.0.0"
+    "idb": "^8.0.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
   },
   "devDependencies": {
+    "@ffmpeg/core": "^0.12.6",
     "@vitejs/plugin-vue": "^5.0.4",
     "vite": "^5.2.0"
   }

@@ -46,6 +46,15 @@
           @dblclick="(c) => $emit('dblclick-clip', c)"
           @mousedown="(e, c) => $emit('mousedown-clip', e, c, track)"
         />
+        <TextClipBlock
+          v-else-if="track.type === 'text'"
+          :clip="clip"
+          :selected="selectedClipIds.includes(clip.id)"
+          :is-drag-active="draggingClipId === clip.id"
+          @click="(id, e) => $emit('click-clip', id, e)"
+          @dblclick="(c) => $emit('dblclick-clip', c)"
+          @mousedown="(e, c) => $emit('mousedown-clip', e, c, track)"
+        />
       </template>
     </div>
   </div>
@@ -54,6 +63,7 @@
 <script setup>
 import ClipBlock from './ClipBlock.vue'
 import AudioClipBlock from './AudioClipBlock.vue'
+import TextClipBlock from './TextClipBlock.vue'
 
 defineProps({
   track: { type: Object, required: true },
@@ -74,6 +84,7 @@ defineEmits(['select-track', 'toggle-mute', 'delete-track', 'click-clip', 'dblcl
   border-bottom: 1px solid #0f3460;
   position: relative;
   min-height: 50px;
+  width: 100%;
 }
 .track.selected { background-color: rgba(233,69,96,0.05); }
 .track.muted { opacity: 0.5; }
@@ -107,5 +118,19 @@ defineEmits(['select-track', 'toggle-mute', 'delete-track', 'click-clip', 'dblcl
 }
 .track:hover .track-delete { opacity: 1; }
 .track-delete:hover { background: #e94560; }
-.track-clips { flex: 1; position: relative; height: 100%; width: 100%; min-width: 520px; }
+.track-clips {
+  flex: 1 0 0;
+  position: relative;
+  height: 100%;
+  min-width: 520px;
+  /* 等距垂直网格，与时间轴缩放同步 */
+  background-image: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 1px
+  );
+  background-size: var(--grid-size, 50px) 100%;
+  background-repeat: repeat;
+  background-position: 0 0;
+}
 </style>

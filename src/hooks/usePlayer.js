@@ -132,28 +132,16 @@ export function usePlayer() {
 
     // === 1. 主时钟计算当前 timeline 位置 ===
     const elapsedSec = (now - playStartTime) / 1000
-    const timelinePos = playStartPos + elapsedSec * playerStore.playbackRate
+    const currentPlaybackRate = playerStore.playbackRate
+    const timelinePos = playStartPos + elapsedSec * currentPlaybackRate
 
     // === 2. 找到当前位置对应的 clip ===
     const found = findClipAtTime(timelinePos)
     let effectiveClip = null
 
     if (!found) {
-      // 播放头在间隙中：找下一个 clip
-      const nextClip = findNextClip(timelinePos)
-      if (nextClip) {
-        effectiveClip = nextClip
-        // 跳播：重置时钟起点到下一个 clip 的起始
-        playStartTime = now
-        playStartPos = nextClip.startTime
-      } else {
-        // 没有下一个 clip，停止
-        finishPlayback()
-        return
-      }
-    } else if (timelinePos >= found.clip.endTime) {
-      // 到达 clip 末尾
-      const nextClip = findNextClip(found.clip.endTime - 0.001)
+      // 播放头在间隙中：精确找下一个在 timelinePos 之后的 clip
+      const nextClip = findClipAfter(timelinePos)
       if (nextClip) {
         effectiveClip = nextClip
         playStartTime = now
@@ -163,24 +151,72 @@ export function usePlayer() {
         return
       }
     } else {
-      effectiveClip = found.clip
+      const { clip } = found
+      if (timelinePos >= clip.endTime) {
+        // 已经超出当前 clip 的尾部
+        const nextClip = findClipAfter(clip.endTime)
+        if (nextClip) {
+          effectiveClip = nextClip
+          playStartTime = now
+          playStartPos = nextClip.startTime
+        } else {
+          finishPlayback()
+          return
+        }
+      } else {
+        // 仍在当前 clip 范围内
+        effectiveClip = clip
+      }
     }
 
     // === 3. Clip 切换检测 ===
     if (effectiveClip.id !== activeClipId) {
       loadClipVideo(effectiveClip)
       activeClipId = effectiveClip.id
-      // 新 clip 的 sourceOffset
-      const sourceOffset = playStartPos - effectiveClip.startTime + effectiveClip.sourceStart
+      const sourceOffset = effectiveClip.sourceStart || 0
+      _applyClipSettings(effectiveClip)
       playVideoAt(sourceOffset)
     }
 
     // === 4. 更新 UI ===
-    const displayPos = playStartPos + (now - playStartTime) / 1000 * playerStore.playbackRate
+    const displayPos = playStartPos + (now - playStartTime) / 1000 * currentPlaybackRate
     timelineStore.setPlayheadPosition(displayPos)
     playerStore.setTimelinePosition(displayPos)
 
     progressRAF = requestAnimationFrame(tick)
+  }
+
+  // 找在指定时间之后的第一个 clip（全局搜索，正确处理 gap）
+  function findClipAfter(time) {
+    const allClips = timelineStore.tracks.flatMap((track) =>
+      track.clips.map(clip => ({ ...clip, trackId: track.id })))
+    allClips.sort((a, b) => a.startTime - b.startTime)
+    for (const clip of allClips) {
+      if (clip.startTime > time + 0.001) return clip
+    }
+    return null
+  }
+
+  // 应用当前 clip 的音量和速度设置
+  function _applyClipSettings(clip) {
+    if (!videoRef.value) return
+    // 全局音量 × clip 音量（clip.volume 默认 1）
+    const vol = playerStore.volume * (clip && clip.volume != null ? clip.volume : 1)
+    videoRef.value.volume = Math.max(0, Math.min(1, vol))
+    // 全局速率 × clip 速率
+    const rate = playerStore.playbackRate * (clip && clip.speed != null ? clip.speed : 1)
+    videoRef.value.playbackRate = Math.max(0.1, Math.min(4, rate))
+  }
+
+  // 获取当前激活的 clip 对象
+  function _getActiveClip() {
+    if (!activeClipId) return null
+    for (const track of timelineStore.tracks) {
+      for (const clip of track.clips) {
+        if (clip.id === activeClipId) return clip
+      }
+    }
+    return null
   }
 
   function finishPlayback() {
@@ -195,11 +231,16 @@ export function usePlayer() {
 
   function scrub(time) {
     if (!videoRef.value) return
+
     const found = findClipAtTime(time)
     if (found) {
       loadClipVideo(found.clip)
       activeClipId = found.clip.id
-      const sourceOffset = time - found.clip.startTime + found.clip.sourceStart
+      _applyClipSettings(found.clip)
+      const sourceOffset = time - found.clip.startTime + (found.clip.sourceStart || 0)
+      // scrub 时必须强制 seek，不管 video 是否在播放
+      // — 播放时 video.currentTime 被主时钟控制，但 scrub 需要打断它
+      // — 暂停时 video.currentTime 不会自动更新，必须显式设置
       videoRef.value.currentTime = sourceOffset
       playerStore.setCurrentTime(sourceOffset)
     }
@@ -216,30 +257,46 @@ export function usePlayer() {
     videoRef.value.load()
   }
 
-  /** 拖动 / 点击游标后 seek 到指定帧 */
+  /** 拖动 / 点击游标后 seek 到指定帧并冻结 */
   function freezeFrame(time) {
     if (!videoRef.value) return
+
     const found = findClipAtTime(time)
+
     if (found) {
       const triggeredLoad = loadClipVideo(found.clip)
       activeClipId = found.clip.id
+      _applyClipSettings(found.clip)
       const sourceOffset = time - found.clip.startTime + found.clip.sourceStart
-      const doSeek = () => {
-        if (!videoRef.value) return
-        videoRef.value.currentTime = sourceOffset
-        videoRef.value.pause()
-      }
+
+      // 如果触发了 load()，必须等 loadedmetadata 才能 seek
       if (triggeredLoad) {
         videoRef.value.addEventListener('loadedmetadata', function onReady() {
           videoRef.value.removeEventListener('loadedmetadata', onReady)
-          doSeek()
-        })
+          // loadedmetadata 后 video 可能会自动播放，强制暂停
+          videoRef.value.pause()
+          // seeked 事件确保帧渲染完成后才彻底冻结
+          videoRef.value.addEventListener('seeked', function onSeeked() {
+            videoRef.value.removeEventListener('seeked', onSeeked)
+            videoRef.value.pause()
+          }, { once: true })
+          videoRef.value.currentTime = sourceOffset
+        }, { once: true })
       } else {
-        doSeek()
+        // source 已加载，直接 seek + 冻结
+        videoRef.value.addEventListener('seeked', function onSeeked() {
+          videoRef.value.removeEventListener('seeked', onSeeked)
+          videoRef.value.pause()
+        }, { once: true })
+        videoRef.value.pause()
+        videoRef.value.currentTime = sourceOffset
       }
       playerStore.setCurrentTime(sourceOffset)
+    } else {
+      // 无 clip 时暂停 video（画面由 CSS 黑屏处理）
+      videoRef.value.pause()
     }
-    // 无 clip 时不做任何事 - 已由 CSS 处理黑屏
+
     timelineStore.setPlayheadPosition(time)
     playerStore.setTimelinePosition(time)
   }
@@ -305,6 +362,7 @@ export function usePlayer() {
     const sourceOffset = targetTimelinePos - targetClip.startTime + targetClip.sourceStart
     loadClipVideo(targetClip)
     activeClipId = targetClip.id
+    _applyClipSettings(targetClip)
     playVideoAt(sourceOffset)
     playerStore.play()
     startMasterClock()
@@ -338,6 +396,7 @@ export function usePlayer() {
     if (found) {
       loadClipVideo(found.clip)
       activeClipId = found.clip.id
+      _applyClipSettings(found.clip)
       const sourceOffset = time - found.clip.startTime + found.clip.sourceStart
       videoRef.value.currentTime = sourceOffset
       videoRef.value.pause()
@@ -366,7 +425,9 @@ export function usePlayer() {
   function setVolume(volume) {
     volume = Math.max(0, Math.min(1, volume))
     playerStore.setVolume(volume)
-    if (videoRef.value) videoRef.value.volume = volume
+    // 重新应用 per-clip 音量
+    const clip = activeClipId ? _getActiveClip() : null
+    _applyClipSettings(clip)
   }
 
   function toggleMute() {
@@ -377,7 +438,9 @@ export function usePlayer() {
   function setPlaybackRate(rate) {
     rate = Math.max(0.1, Math.min(4, rate))
     playerStore.setPlaybackRate(rate)
-    if (videoRef.value) videoRef.value.playbackRate = rate
+    // 重新应用 per-clip 速率
+    const clip = activeClipId ? _getActiveClip() : null
+    _applyClipSettings(clip)
   }
 
   function toggleFullscreen() {

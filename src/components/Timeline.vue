@@ -5,6 +5,7 @@
       <div class="track-controls">
         <button class="track-btn" @click="handleAddVideoTrack">+ 视频轨道</button>
         <button class="track-btn" @click="handleAddAudioTrack">+ 音频轨道</button>
+        <button class="track-btn text" @click="handleAddTextTrack">+ 字幕轨道</button>
       </div>
       <div class="zoom-control">
         <span>缩放:</span>
@@ -28,6 +29,7 @@
       <div
         class="timeline-body"
         ref="timelineBodyRef"
+        :style="timelineBodyStyle"
         @dragover.prevent="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
@@ -123,7 +125,7 @@ const projectStore = useProjectStore()
 const playerStore = usePlayerStore()
 const { splitClip, duplicateClip, undo, redo, addTrack, removeTrack } = useVideoEditor()
 const { seek: playerSeek, scrub, clearPreview, freezeFrame, play, pause, loadClipVideo, findClipAtTime, findNextClip } = usePlayer()
-const { timeToPixel, getTimelineWidth, getPlayheadPixel } = useTimeGrid()
+const { timeToPixel, getTimelineWidth, getPlayheadPixel, clipTimeToPixel } = useTimeGrid()
 
 // Refs
 const scrollContainerRef = ref(null)
@@ -160,7 +162,19 @@ const {
 
 // ===================== 计算 =====================
 
-const timelineWidth = computed(() => getTimelineWidth(timelineStore.duration))
+// 时间轴总宽度：至少撑满可视区域，避免向右滚动时出现空白网格
+const timelineWidth = computed(() => {
+  const contentWidth = getTimelineWidth(timelineStore.duration)
+  return Math.max(contentWidth, viewWidth.value || 1200)
+})
+
+// 每 1 秒对应的像素宽度（不含 label 偏移），用于绘制 clip 区域等距网格背景
+const gridSizePx = computed(() => Math.max(10, clipTimeToPixel(1)))
+
+const timelineBodyStyle = computed(() => ({
+  width: `${timelineWidth.value}px`,
+  '--grid-size': `${gridSizePx.value}px`
+}))
 
 const playheadPixel = computed(() => getPlayheadPixel(timelineStore.playheadPosition))
 
@@ -264,6 +278,27 @@ function getVideoThumbnail(videoId) {
 
 function handleAddVideoTrack() { addTrack('video') }
 function handleAddAudioTrack() { addTrack('audio') }
+function handleAddTextTrack() {
+  const textTrack = addTrack('text')
+  if (textTrack) {
+    // 自动添加一个默认文字 clip
+    timelineStore.addTextClip(textTrack.id, {
+      startTime: Math.max(0, timelineStore.playheadPosition),
+      endTime: Math.max(0, timelineStore.playheadPosition) + 5,
+      content: '字幕文字',
+      textStyle: {
+        fontSize: 36,
+        color: '#ffffff',
+        backgroundColor: 'transparent',
+        x: 'center',
+        y: 'bottom',
+        bold: false,
+        italic: false,
+        shadow: true
+      }
+    })
+  }
+}
 function handleRemoveTrack(trackId) { removeTrack(trackId) }
 function handleToggleMute(trackId) { timelineStore.toggleTrackMute(trackId) }
 
@@ -326,6 +361,14 @@ function handleDuplicateClip() {
   transition: background-color 0.2s;
 }
 .track-btn:hover { background-color: #e94560; }
+.track-btn.text {
+  border-color: #6c63ff;
+  color: #a09dff;
+}
+.track-btn.text:hover {
+  background-color: #6c63ff;
+  color: #fff;
+}
 .zoom-control { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #888; }
 .zoom-slider { width: 100px; accent-color: #e94560; }
 
@@ -335,9 +378,14 @@ function handleDuplicateClip() {
   min-height: 0;
   position: relative;
 }
-.timeline-body { position: relative; min-height: 100%; }
+.timeline-body {
+  position: relative;
+  min-height: 100%;
+}
 
-.tracks-wrapper { min-width: 600px; }
+.tracks-wrapper { min-width: 600px; width: 100%; }
+
+.tracks-wrapper .track { width: 100%; }
 
 .drop-preview-line {
   position: absolute; top: 0; bottom: 0;

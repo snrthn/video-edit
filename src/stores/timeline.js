@@ -445,6 +445,76 @@ export const useTimelineStore = defineStore('timeline', () => {
     updateDuration()
   }
 
+  // === 文字 Clip ===
+  function addTextClip(trackId, data = {}) {
+    const track = tracks.value.find(t => t.id === trackId)
+    if (!track || track.locked || track.type !== 'text') return null
+
+    const clip = {
+      id: generateId('text_clip'),
+      type: 'text',
+      trackId,
+      startTime: +(data.startTime || 0).toFixed(4),
+      endTime: +(data.endTime || (data.startTime + 5) || 5).toFixed(4),
+      content: data.content || '输入文字',
+      textStyle: {
+        fontFamily: data.textStyle?.fontFamily || 'Arial, sans-serif',
+        fontSize: data.textStyle?.fontSize || 36,
+        color: data.textStyle?.color || '#ffffff',
+        backgroundColor: data.textStyle?.backgroundColor || 'transparent',
+        x: data.textStyle?.x || 'center',
+        y: data.textStyle?.y || 'center',
+        bold: data.textStyle?.bold || false,
+        italic: data.textStyle?.italic || false,
+        shadow: data.textStyle?.shadow ?? true
+      }
+    }
+
+    track.clips.push(clip)
+    track.clips.sort((a, b) => a.startTime - b.startTime)
+    updateDuration()
+
+    saveCommand('添加文字',
+      { clipId: clip.id, trackId },
+      { tracks: JSON.parse(JSON.stringify(tracks.value)) }
+    )
+    return clip
+  }
+
+  function updateTextClip(clipId, updates) {
+    const found = findClipById(clipId)
+    if (!found) return
+
+    const { clip } = found
+    if (updates.content !== undefined) clip.content = updates.content
+    if (updates.textStyle) {
+      clip.textStyle = { ...clip.textStyle, ...updates.textStyle }
+    }
+    if (updates.startTime !== undefined) clip.startTime = +updates.startTime.toFixed(4)
+    if (updates.endTime !== undefined) clip.endTime = +updates.endTime.toFixed(4)
+
+    found.track.clips.sort((a, b) => a.startTime - b.startTime)
+    updateDuration()
+
+    saveCommand('更新文字', { clipId, updates }, {
+      tracks: JSON.parse(JSON.stringify(tracks.value))
+    })
+  }
+
+  function getActiveTextClips(time) {
+    const result = []
+    for (const track of tracks.value) {
+      if (track.type !== 'text') continue
+      for (const clip of track.clips) {
+        if (time >= clip.startTime && time < clip.endTime) {
+          result.push({ ...clip, trackId: track.id })
+        }
+      }
+    }
+    result.sort((a, b) => a.startTime - b.startTime)
+    return result
+  }
+
   // === 滤镜 ===
   function addFilterToClip(clipId, filter) {
     const found = findClipById(clipId)
@@ -580,6 +650,11 @@ export const useTimelineStore = defineStore('timeline', () => {
     splitClip,
     moveClip,
     moveClipBatch,
+
+    // 文字
+    addTextClip,
+    updateTextClip,
+    getActiveTextClips,
 
     // 滤镜
     addFilterToClip,
