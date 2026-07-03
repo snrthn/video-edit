@@ -162,6 +162,26 @@
 
       <div class="prop-separator" />
 
+      <!-- === 关联音频 === -->
+      <template v-if="linkedAudioInfo">
+        <div class="prop-group">
+          <label class="prop-label">关联音频</label>
+          <div class="prop-value readonly">{{ linkedAudioInfo.name }}</div>
+        </div>
+        <div class="action-btns">
+          <button class="action-btn detach-btn" @click="handleDetachAudio">分离音频</button>
+          <button class="action-btn replace-btn" @click="openAudioFilePicker">替换音频</button>
+        </div>
+        <input
+          ref="audioFileInput"
+          type="file"
+          accept="audio/*"
+          style="display:none"
+          @change="handleReplaceAudio"
+        />
+        <div class="prop-separator" />
+      </template>
+
       <div class="prop-group">
         <label class="prop-label">素材起始偏移</label>
         <div class="prop-input-row">
@@ -181,18 +201,28 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useTimelineStore, useProjectStore } from '../stores'
+import { useVideoEditor } from '../hooks/useVideoEditor'
+import { useVideoImporter } from '../hooks/useVideoImporter'
 import { triggerSave } from '../main'
 
 const timelineStore = useTimelineStore()
 const projectStore = useProjectStore()
+const { detachAudio, replaceAudioSource } = useVideoEditor()
+const { importAudioFromFile } = useVideoImporter()
 
 const speedPresets = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
 
 const selectedClip = computed(() => {
   if (timelineStore.selectedClipIds.length !== 1) return null
   return timelineStore.selectedClips[0] || null
+})
+
+// 查找 clip 所在轨道的信息
+const selectedClipContext = computed(() => {
+  if (!selectedClip.value) return null
+  return timelineStore.findClipById(selectedClip.value.id) || null
 })
 
 const isTextClip = computed(() => {
@@ -203,6 +233,21 @@ const videoName = computed(() => {
   if (!selectedClip.value) return ''
   const video = projectStore.getVideo(selectedClip.value.videoId)
   return video?.name || '未知素材'
+})
+
+/** 当前选中 clip 关联的音频信息 */
+const linkedAudioInfo = computed(() => {
+  if (!selectedClip.value || !selectedClip.value.linkedClipId) return null
+  const linked = timelineStore.findClipById(selectedClip.value.linkedClipId)
+  if (!linked) return null
+  // 只有当 selectedClip 是视频、linked 是音频时显示
+  if (selectedClipContext.value?.track.type !== 'video' || linked.track.type !== 'audio') return null
+  const audio = projectStore.getVideo(linked.clip.videoId)
+  return {
+    clipId: linked.clip.id,
+    name: audio?.name || '音频素材',
+    trackName: linked.track.name
+  }
 })
 
 const bgColorValue = computed(() => {
@@ -218,6 +263,34 @@ const formatDuration = computed(() => {
   const secs = (dur % 60).toFixed(1)
   return mins > 0 ? `${mins}分${secs.padStart(4, '0')}秒` : `${secs}秒`
 })
+
+const audioFileInput = ref(null)
+
+function openAudioFilePicker() {
+  audioFileInput.value?.click()
+}
+
+async function handleReplaceAudio(e) {
+  const file = e.target.files?.[0]
+  if (!file || !linkedAudioInfo.value) return
+  try {
+    const audioAsset = await importAudioFromFile(file)
+    if (audioAsset) {
+      replaceAudioSource(linkedAudioInfo.value.clipId, audioAsset.id)
+      triggerSave()
+    }
+  } catch (err) {
+    console.error('替换音频失败:', err)
+  }
+  // 重置 input，确保可以再次选择同一文件
+  if (audioFileInput.value) audioFileInput.value.value = ''
+}
+
+function handleDetachAudio() {
+  if (!selectedClip.value) return
+  detachAudio(selectedClip.value.id)
+  triggerSave()
+}
 
 function updateProp(key, value) {
   if (!selectedClip.value || isNaN(value)) return
@@ -427,5 +500,44 @@ function updateTextProp(key, value) {
   color: #555;
   text-align: center;
   margin-top: 24px;
+}
+
+.action-btn {
+  display: block;
+  flex: 1;
+  padding: 6px 12px;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.action-btns {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.detach-btn {
+  background-color: #1a1a2e;
+  color: #e94560;
+  border-color: #e94560;
+}
+
+.detach-btn:hover {
+  background-color: #e94560;
+  color: #fff;
+}
+
+.replace-btn {
+  background-color: #1a1a2e;
+  color: #f0a500;
+  border-color: #f0a500;
+}
+
+.replace-btn:hover {
+  background-color: #f0a500;
+  color: #fff;
 }
 </style>

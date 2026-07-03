@@ -36,6 +36,27 @@ export async function getVideoMetadata(videoUrl) {
   })
 }
 
+export async function getAudioMetadata(audioUrl) {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement('audio')
+    audio.preload = 'metadata'
+
+    audio.onloadedmetadata = () => {
+      resolve({
+        duration: audio.duration || 0
+      })
+      audio.remove()
+    }
+
+    audio.onerror = () => {
+      reject(new Error('Failed to load audio metadata'))
+      audio.remove()
+    }
+
+    audio.src = audioUrl
+  })
+}
+
 export async function generateThumbnail(videoUrl, time = 0) {
   return new Promise((resolve) => {
     const video = document.createElement('video')

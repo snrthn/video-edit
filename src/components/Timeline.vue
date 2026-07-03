@@ -72,7 +72,7 @@
             :is-selected="track.id === timelineStore.selectedTrackId"
             :selected-clip-ids="timelineStore.selectedClipIds"
             :dragging-clip-id="isDragging ? dragState?.clipId : null"
-            :deletable="timelineStore.tracks.filter(t => t.type === track.type).length > 1"
+            :deletable="!isDefaultTrack(track, idx)"
             :get-video-name="getVideoName"
             :get-video-thumbnail="getVideoThumbnail"
             @select-track="timelineStore.selectTrack"
@@ -234,6 +234,8 @@ function handleDrop(e) {
   const videoId = e.dataTransfer.getData('videoId')
   if (!videoId) return
 
+  const mediaType = e.dataTransfer.getData('mediaType') || 'video'
+
   const scrollL = scrollContainerRef.value?.scrollLeft || 0
   const dropTime = Math.max(0, engine.pixelToTime(dropPixelX.value - scrollL + scrollL))
 
@@ -241,9 +243,10 @@ function handleDrop(e) {
   if (dropTargetTrackIdx.value != null) {
     targetTrack = timelineStore.tracks[dropTargetTrackIdx.value]
   }
-  if (!targetTrack || targetTrack.type !== 'video') {
-    targetTrack = timelineStore.tracks.find(t => t.type === 'video')
-    if (!targetTrack) targetTrack = timelineStore.addTrack('video')
+  // 根据媒体类型路由到对应轨道
+  if (!targetTrack || targetTrack.type !== mediaType) {
+    targetTrack = timelineStore.tracks.find(t => t.type === mediaType)
+    if (!targetTrack) targetTrack = timelineStore.addTrack(mediaType)
   }
 
   const video = projectStore.getVideo(videoId)
@@ -274,6 +277,17 @@ function getVideoThumbnail(videoId) {
   return projectStore.getVideo(videoId)?.thumbnail || ''
 }
 
+// 判断是否为默认轨道（每种类型的第一条，不可删除）
+function isDefaultTrack(track, idx) {
+  if (track.type === 'video') {
+    return idx === timelineStore.tracks.findIndex(t => t.type === 'video')
+  }
+  if (track.type === 'audio') {
+    return idx === timelineStore.tracks.findIndex(t => t.type === 'audio')
+  }
+  return false // text 轨道总是可删除
+}
+
 // ===================== 事件处理 =====================
 
 function handleAddVideoTrack() { addTrack('video') }
@@ -299,12 +313,19 @@ function handleAddTextTrack() {
     })
   }
 }
-function handleRemoveTrack(trackId) { removeTrack(trackId) }
+function handleRemoveTrack(trackId) {
+  // 默认轨道不可删除
+  const trackIdx = timelineStore.tracks.findIndex(t => t.id === trackId)
+  if (trackIdx === -1) return
+  const track = timelineStore.tracks[trackIdx]
+  if (isDefaultTrack(track, trackIdx)) return
+  removeTrack(trackId)
+}
 function handleToggleMute(trackId) { timelineStore.toggleTrackMute(trackId) }
 
 function handleClipDoubleClick(clip) {
   const found = timelineStore.findClipById(clip.id)
-  if (found && found.track.type === 'video') {
+  if (found && (found.track.type === 'video' || found.track.type === 'audio')) {
     loadClipVideo(clip)
     timelineStore.setPlayheadPosition(clip.startTime)
     setTimeout(() => { playerSeek(0); play() }, 100)

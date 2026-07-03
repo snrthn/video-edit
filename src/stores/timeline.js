@@ -589,6 +589,48 @@ export const useTimelineStore = defineStore('timeline', () => {
     if (track) track.muted = !track.muted
   }
 
+  // === 音频分离/替换 ===
+
+  /** 断开视频 clip 与关联音频 clip 的链接，之后可独立删除 */
+  function detachAudio(clipId) {
+    const clip = findClipById(clipId)?.clip
+    if (!clip || !clip.linkedClipId) return false
+
+    const linked = findClipById(clip.linkedClipId)?.clip
+    if (linked) linked.linkedClipId = null
+    clip.linkedClipId = null
+
+    saveCommand('分离音频',
+      { clipId },
+      {
+        tracks: JSON.parse(JSON.stringify(tracks.value)),
+        selectedClipIds: [...selectedClipIds.value],
+        selectedTrackId: selectedTrackId.value,
+        playheadPosition: playheadPosition.value
+      }
+    )
+    return true
+  }
+
+  /** 替换音频 clip 的源素材（videoId 指向 projectStore 中的音频资源） */
+  function replaceAudioSource(clipId, newAudioId) {
+    const clip = findClipById(clipId)?.clip
+    if (!clip) return false
+
+    clip.videoId = newAudioId
+
+    saveCommand('替换音频',
+      { clipId, newAudioId },
+      {
+        tracks: JSON.parse(JSON.stringify(tracks.value)),
+        selectedClipIds: [...selectedClipIds.value],
+        selectedTrackId: selectedTrackId.value,
+        playheadPosition: playheadPosition.value
+      }
+    )
+    return true
+  }
+
   // === 重置 ===
   function resetTimeline() {
     tracks.value = [
@@ -640,6 +682,8 @@ export const useTimelineStore = defineStore('timeline', () => {
     removeTrack,
     updateTrack,
     toggleTrackMute,
+    detachAudio,
+    replaceAudioSource,
 
     // Clip
     makeClip,

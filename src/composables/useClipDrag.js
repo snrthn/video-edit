@@ -36,7 +36,8 @@ export function useClipDrag({ timelineBodyRef, scrollContainerRef }) {
 
   function onClipMouseDown(e, clip, track) {
     // e.currentTarget 经过 Vue emit 链后不可靠，用 target.closest 定位
-    const clipEl = e.target?.closest?.('.clip')
+    // 同时匹配 .clip (视频/文字) 和 .audio-clip (音频)
+    const clipEl = e.target?.closest?.('.clip, .audio-clip')
     if (!clipEl) return { action: 'none' }
 
     const rect = clipEl.getBoundingClientRect()

@@ -1,6 +1,6 @@
 import { ref } from 'vue';
 import { useProjectStore } from '../stores';
-import { getVideoMetadata, generateThumbnail, generateId, getProxyUrl } from '../utils/video-utils';
+import { getVideoMetadata, getAudioMetadata, generateThumbnail, generateId, getProxyUrl } from '../utils/video-utils';
 import { fetchBlob, blobToUrl } from '../utils/video-utils';
 import { triggerSave } from '../main';
 
@@ -80,6 +80,7 @@ export function useVideoImporter() {
       }, file.name, metadata);
 
       video.thumbnail = thumbnail;
+      video.mediaType = 'video';
 
       importProgress.value = 100;
       isImporting.value = false;
@@ -94,16 +95,56 @@ export function useVideoImporter() {
     }
   }
 
+  async function importAudioFromFile(file) {
+    isImporting.value = true;
+    importProgress.value = 0;
+    importError.value = null;
+    try {
+      importProgress.value = 20;
+
+      const blobUrl = blobToUrl(file);
+      importProgress.value = 40;
+
+      const metadata = await getAudioMetadata(blobUrl);
+      importProgress.value = 80;
+
+      const audio = projectStore.addVideoFromSource({
+        type: 'blob',
+        url: blobUrl,
+        blob: file,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      }, file.name, metadata);
+
+      audio.mediaType = 'audio';
+
+      importProgress.value = 100;
+      isImporting.value = false;
+
+      triggerSave();
+
+      return audio;
+    } catch (error) {
+      importError.value = error.message;
+      isImporting.value = false;
+      throw error;
+    }
+  }
+
   async function importFromLocalFiles(files) {
     const results = [];
     for (const file of files) {
-      if (file.type.startsWith('video/')) {
-        try {
+      try {
+        if (file.type.startsWith('video/')) {
           const video = await importFromFile(file);
           results.push({ success: true, video });
-        } catch (error) {
-          results.push({ success: false, error: error.message, fileName: file.name });
+        } else if (file.type.startsWith('audio/')) {
+          const audio = await importAudioFromFile(file);
+          results.push({ success: true, video: audio });
         }
+      } catch (error) {
+        results.push({ success: false, error: error.message, fileName: file.name });
       }
     }
     return results;
@@ -129,6 +170,7 @@ export function useVideoImporter() {
     importError,
     importFromUrl,
     importFromFile,
+    importAudioFromFile,
     importFromLocalFiles,
     removeVideo
   };

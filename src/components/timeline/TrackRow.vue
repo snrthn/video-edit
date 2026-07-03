@@ -15,11 +15,18 @@
           title="静音"
         >{{ track.muted ? '🔇' : '🔊' }}</button>
         <button
-          v-if="deletable"
           class="track-delete"
-          @click.stop="$emit('delete-track', track.id)"
-          title="删除轨道"
-        >×</button>
+          :disabled="!deletable"
+          @click.stop="deletable && $emit('delete-track', track.id)"
+          :title="deletable ? '删除轨道' : '默认轨道不可删除'"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+            <path d="M10 11v6"></path><path d="M14 11v6"></path>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+          </svg>
+        </button>
       </div>
     </div>
     <div class="track-clips" ref="clipArea">
@@ -106,18 +113,17 @@ defineEmits(['select-track', 'toggle-mute', 'delete-track', 'click-clip', 'dblcl
   z-index: 5;
 }
 .track-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.track-actions { display: flex; flex-direction: column; align-items: center; gap: 2px; flex-shrink: 0; }
 .track-mute { background: none; border: none; cursor: pointer; font-size: 14px; padding: 0; opacity: 0.6; }
 .track-mute:hover { opacity: 1; }
 .track-mute.muted { opacity: 0.3; }
 .track-delete {
-  width: 16px; height: 16px;
-  background: rgba(233,69,96,0.6); border: none; border-radius: 50%;
-  color: #fff; cursor: pointer; font-size: 11px; line-height: 1;
-  opacity: 0; transition: opacity 0.15s;
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; padding: 0; opacity: 0.6; color: #aaa;
+  display: flex; align-items: center; justify-content: center;
 }
-.track:hover .track-delete { opacity: 1; }
-.track-delete:hover { background: #e94560; }
+.track-delete:hover:not(:disabled) { opacity: 1; color: #e94560; }
+.track-delete:disabled { opacity: 0.2; cursor: not-allowed; color: #555; }
 .track-clips {
   flex: 1 0 0;
   position: relative;

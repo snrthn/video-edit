@@ -1,7 +1,7 @@
 <template>
   <div class="video-panel">
     <div class="panel-header">
-      <h2>视频列表</h2>
+      <h2>素材列表</h2>
       <div class="header-actions">
         <button class="action-btn" @click="triggerFileInput">本地导入</button>
         <button class="action-btn" @click="showUrlInput = !showUrlInput">URL导入</button>
@@ -9,7 +9,7 @@
       <input
         ref="fileInputRef"
         type="file"
-        accept="video/*"
+        accept="video/*,audio/*"
         multiple
         style="display: none"
         @change="handleFileSelect"
@@ -55,7 +55,7 @@
       >
         <div class="video-thumbnail">
           <img v-if="video.thumbnail" :src="video.thumbnail" alt="" />
-          <div v-else class="placeholder-thumb">🎬</div>
+          <div v-else class="placeholder-thumb">{{ video.mediaType === 'audio' ? '🎵' : '🎬' }}</div>
         </div>
         <div class="video-info">
           <span class="video-name">{{ video.name }}</span>
@@ -66,8 +66,8 @@
 
       <div v-if="projectStore.videoList.length === 0" class="empty-state">
         <div class="empty-icon">📁</div>
-        <p>暂无视频</p>
-        <p class="hint">点击上方按钮导入视频</p>
+        <p>暂无素材</p>
+        <p class="hint">点击上方按钮导入视频或音频</p>
       </div>
     </div>
   </div>
@@ -120,6 +120,7 @@ function handleDragStart(event, video) {
   draggingVideoId.value = video.id
   event.dataTransfer.setData('videoId', video.id)
   event.dataTransfer.setData('videoName', video.name)
+  event.dataTransfer.setData('mediaType', video.mediaType || 'video')
   event.dataTransfer.effectAllowed = 'copy'
 }
 
@@ -128,12 +129,16 @@ function handleDragEnd() {
 }
 
 function addToTimeline(videoId) {
-  let targetTrack = timelineStore.tracks.find(t => t.type === 'video')
-  if (!targetTrack) {
-    targetTrack = timelineStore.addTrack('video')
-  }
   const video = projectStore.getVideo(videoId)
-  if (video && targetTrack) {
+  if (!video) return
+
+  const mediaType = video.mediaType || 'video'
+  let targetTrack = timelineStore.tracks.find(t => t.type === mediaType)
+  if (!targetTrack) {
+    targetTrack = timelineStore.addTrack(mediaType)
+  }
+
+  if (targetTrack) {
     timelineStore.addClip(
       targetTrack.id,
       videoId,

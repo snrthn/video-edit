@@ -36,6 +36,18 @@ export function useVideoEditor() {
     triggerSave()
   }
 
+  function detachAudio(clipId) {
+    const result = timelineStore.detachAudio(clipId)
+    if (result) triggerSave()
+    return result
+  }
+
+  function replaceAudioSource(clipId, newAudioId) {
+    const result = timelineStore.replaceAudioSource(clipId, newAudioId)
+    if (result) triggerSave()
+    return result
+  }
+
   // ===================== Clip CRUD =====================
 
   function addClip(videoId, trackId, startTime = 0) {
@@ -217,6 +229,8 @@ export function useVideoEditor() {
     addTrack,
     removeTrack,
     toggleMuteTrack,
+    detachAudio,
+    replaceAudioSource,
 
     addClip,
     removeClip,

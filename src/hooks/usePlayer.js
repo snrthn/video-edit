@@ -33,11 +33,104 @@ export function usePlayer() {
   }
 
   // ============================================================
+  // Audio 元素池 — 每个音频 clip 独立一个 <audio>，与 video 并行播放
+  // ============================================================
+
+  const audioPool = new Map()  // clipId → HTMLAudioElement
+
+  function _stopAllAudio() {
+    for (const [, audio] of audioPool) {
+      audio.pause()
+      audio.remove()
+    }
+    audioPool.clear()
+  }
+
+  /** 查找 clip 所属轨道是否被静音 */
+  function _isTrackMuted(clip) {
+    if (!clip) return false
+    for (const track of timelineStore.tracks) {
+      if (track.clips.some(c => c.id === clip.id)) return track.muted
+    }
+    return false
+  }
+
+  function _applyAudioSettings(audio, clip) {
+    const vol = playerStore.volume * (clip && clip.volume != null ? clip.volume : 1)
+    audio.volume = Math.max(0, Math.min(1, vol))
+    audio.muted = playerStore.isMuted || _isTrackMuted(clip)
+    const rate = playerStore.playbackRate * (clip && clip.speed != null ? clip.speed : 1)
+    audio.playbackRate = Math.max(0.1, Math.min(4, rate))
+  }
+
+  /**
+   * 同步音频轨道：根据当前 timeline 位置管理每个音频 clip 的播放/暂停
+   * 在 tick() 每一帧调用，只切换音频状态，不参与视频 gap 逻辑
+   */
+  function syncAudioTracks(timelinePos) {
+    const currentIds = new Set()
+
+    for (const track of timelineStore.tracks) {
+      if (track.type !== 'audio') continue
+      if (track.muted) continue
+      for (const clip of track.clips) {
+        if (timelinePos < clip.startTime || timelinePos >= clip.endTime) continue
+
+        currentIds.add(clip.id)
+        let audioEl = audioPool.get(clip.id)
+
+        if (!audioEl) {
+          const media = projectStore.getVideo(clip.videoId)
+          if (!media) continue
+
+          audioEl = new Audio()
+          audioEl.crossOrigin = 'anonymous'
+          audioEl.preload = 'auto'
+          audioEl.src = media.source.url
+          _applyAudioSettings(audioEl, clip)
+          audioEl.load()
+          audioPool.set(clip.id, audioEl)
+        }
+
+        // 首次启动或漂移过大时重新 seek
+        const sourceOffset = clip.sourceStart || 0
+        const clipLocalTime = timelinePos - clip.startTime + sourceOffset
+        if (audioEl.paused || Math.abs(audioEl.currentTime - clipLocalTime) > 0.8) {
+          audioEl.currentTime = clipLocalTime
+          if (audioEl.paused) {
+            audioEl.play().catch(() => {})
+          }
+        }
+      }
+    }
+
+    // 清理不再需要的 audio 元素
+    for (const [clipId, audioEl] of audioPool) {
+      if (!currentIds.has(clipId)) {
+        audioEl.pause()
+        audioEl.remove()
+        audioPool.delete(clipId)
+      }
+    }
+  }
+
+  // ============================================================
   // Clip 查找
   // ============================================================
 
   function findClipAtTime(time) {
     for (const track of timelineStore.tracks) {
+      for (const clip of track.clips) {
+        if (time >= clip.startTime && time < clip.endTime) return { clip, track }
+      }
+    }
+    return null
+  }
+
+  /** 仅搜索视频轨道上的 clip（供 tick 主循环使用） */
+  function findFirstVideoClipAtTime(time) {
+    for (const track of timelineStore.tracks) {
+      if (track.type !== 'video') continue
       for (const clip of track.clips) {
         if (time >= clip.startTime && time < clip.endTime) return { clip, track }
       }
@@ -135,8 +228,8 @@ export function usePlayer() {
     const currentPlaybackRate = playerStore.playbackRate
     const timelinePos = playStartPos + elapsedSec * currentPlaybackRate
 
-    // === 2. 找到当前位置对应的 clip ===
-    const found = findClipAtTime(timelinePos)
+    // === 2. 找到当前位置对应的视频 clip ===
+    const found = findFirstVideoClipAtTime(timelinePos)
     let effectiveClip = null
 
     if (!found) {
@@ -178,7 +271,10 @@ export function usePlayer() {
       playVideoAt(sourceOffset)
     }
 
-    // === 4. 更新 UI ===
+    // === 4. 同步音频轨道（独立于视频，不参与 gap 逻辑）===
+    syncAudioTracks(timelinePos)
+
+    // === 5. 更新 UI ===
     const displayPos = playStartPos + (now - playStartTime) / 1000 * currentPlaybackRate
     timelineStore.setPlayheadPosition(displayPos)
     playerStore.setTimelinePosition(displayPos)
@@ -206,14 +302,20 @@ export function usePlayer() {
     // 全局速率 × clip 速率
     const rate = playerStore.playbackRate * (clip && clip.speed != null ? clip.speed : 1)
     videoRef.value.playbackRate = Math.max(0.1, Math.min(4, rate))
+    // 全局静音 或 轨道静音
+    videoRef.value.muted = playerStore.isMuted || _isTrackMuted(clip)
   }
 
   // 获取当前激活的 clip 对象
   function _getActiveClip() {
     if (!activeClipId) return null
+    return _findClipById(activeClipId)
+  }
+
+  function _findClipById(clipId) {
     for (const track of timelineStore.tracks) {
       for (const clip of track.clips) {
-        if (clip.id === activeClipId) return clip
+        if (clip.id === clipId) return clip
       }
     }
     return null
@@ -222,6 +324,7 @@ export function usePlayer() {
   function finishPlayback() {
     playerStore.pause()
     if (videoRef.value) videoRef.value.pause()
+    _stopAllAudio()
     stopMasterClock()
   }
 
@@ -232,7 +335,7 @@ export function usePlayer() {
   function scrub(time) {
     if (!videoRef.value) return
 
-    const found = findClipAtTime(time)
+    const found = findFirstVideoClipAtTime(time)
     if (found) {
       loadClipVideo(found.clip)
       activeClipId = found.clip.id
@@ -261,7 +364,7 @@ export function usePlayer() {
   function freezeFrame(time) {
     if (!videoRef.value) return
 
-    const found = findClipAtTime(time)
+    const found = findFirstVideoClipAtTime(time)
 
     if (found) {
       const triggeredLoad = loadClipVideo(found.clip)
@@ -343,7 +446,7 @@ export function usePlayer() {
     if (!videoRef.value) return
     stopPlayheadMove()
 
-    const found = findClipAtTime(timelineStore.playheadPosition)
+    const found = findFirstVideoClipAtTime(timelineStore.playheadPosition)
     const firstClip = findFirstClip()
     if (!firstClip) return
 
@@ -372,6 +475,7 @@ export function usePlayer() {
     stopPlayheadMove()
     stopMasterClock()
     if (videoRef.value) videoRef.value.pause()
+    _stopAllAudio()
     playerStore.pause()
     triggerSave()
   }
@@ -380,6 +484,7 @@ export function usePlayer() {
     stopPlayheadMove()
     stopMasterClock()
     if (videoRef.value) videoRef.value.pause()
+    _stopAllAudio()
     playerStore.pause()
     timelineStore.setPlayheadPosition(0)
     playerStore.setTimelinePosition(0)
@@ -390,9 +495,10 @@ export function usePlayer() {
     const wasPlaying = playerStore.isPlaying
     stopPlayheadMove()
     if (wasPlaying) stopMasterClock()
+    _stopAllAudio()
 
     if (!videoRef.value) return
-    const found = findClipAtTime(time)
+    const found = findFirstVideoClipAtTime(time)
     if (found) {
       loadClipVideo(found.clip)
       activeClipId = found.clip.id
@@ -428,11 +534,19 @@ export function usePlayer() {
     // 重新应用 per-clip 音量
     const clip = activeClipId ? _getActiveClip() : null
     _applyClipSettings(clip)
+    // 同步到所有 audio 元素
+    for (const [clipId, audio] of audioPool) {
+      const ac = _findClipById(clipId)
+      _applyAudioSettings(audio, ac)
+    }
   }
 
   function toggleMute() {
     playerStore.toggleMute()
     if (videoRef.value) videoRef.value.muted = playerStore.isMuted
+    for (const [, audio] of audioPool) {
+      audio.muted = playerStore.isMuted
+    }
   }
 
   function setPlaybackRate(rate) {
@@ -441,6 +555,11 @@ export function usePlayer() {
     // 重新应用 per-clip 速率
     const clip = activeClipId ? _getActiveClip() : null
     _applyClipSettings(clip)
+    // 同步到所有 audio 元素
+    for (const [clipId, audio] of audioPool) {
+      const ac = _findClipById(clipId)
+      _applyAudioSettings(audio, ac)
+    }
   }
 
   function toggleFullscreen() {
@@ -465,6 +584,7 @@ export function usePlayer() {
   onUnmounted(() => {
     stopMasterClock()
     stopPlayheadMove()
+    _stopAllAudio()
   })
 
   return {
